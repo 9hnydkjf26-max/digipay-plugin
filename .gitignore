@@ -1,0 +1,29 @@
+# Dependencies
+vendor/
+
+# Composer
+composer.lock
+
+# Environment
+.env
+.env.*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# PHPUnit
+.phpunit.result.cache
+phpunit.xml.dist
+
+# Build artifacts
+*.zip
+
+# Claude
+.claude/

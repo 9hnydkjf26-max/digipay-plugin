@@ -1,0 +1,35 @@
+{
+    "name": "digipay/woocommerce-payment-gateway",
+    "description": "Digipay WooCommerce Payment Gateway Plugin",
+    "type": "wordpress-plugin",
+    "license": "proprietary",
+    "minimum-stability": "stable",
+    "require": {
+        "php": ">=7.4"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.5",
+        "wp-phpunit/wp-phpunit": "^6.0",
+        "yoast/phpunit-polyfills": "^1.0",
+        "squizlabs/php_codesniffer": "^3.7",
+        "wp-coding-standards/wpcs": "^3.0",
+        "dealerdirect/phpcodesniffer-composer-installer": "^1.0"
+    },
+    "autoload": {
+        "classmap": [
+            "woocommerce-gateway-paygo.php",
+            "class-block.php",
+            "class-github-updater.php"
+        ]
+    },
+    "scripts": {
+        "test": "phpunit",
+        "phpcs": "phpcs --standard=WordPress",
+        "phpcbf": "phpcbf --standard=WordPress"
+    },
+    "config": {
+        "allow-plugins": {
+            "dealerdirect/phpcodesniffer-composer-installer": true
+        }
+    }
+}
