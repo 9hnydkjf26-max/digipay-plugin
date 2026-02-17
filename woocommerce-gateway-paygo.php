@@ -2,7 +2,7 @@
 /*
 Plugin Name: WooCommerce Payment Gateway
 Description: Configurable payment gateway for WooCommerce with credit card processing
-Version: 13.0.0
+Version: 13.0.1
 Author: Payment Gateway
 Author URI: https://example.com
 GitHub Plugin URI: configured-via-settings
@@ -11,7 +11,7 @@ GitHub Plugin URI: configured-via-settings
 defined( 'ABSPATH' ) or exit;
 
 // Plugin constants.
-define( 'WCPG_VERSION', '13.0.0' );
+define( 'WCPG_VERSION', '13.0.1' );
 define( 'WCPG_PLUGIN_FILE', __FILE__ );
 define( 'WCPG_GATEWAY_ID', 'paygobillingcc' );
 
@@ -241,7 +241,7 @@ add_action( 'rest_api_init', function() {
                 'sanitize_callback' => 'absint',
             ),
             'status_post' => array(
-                'required'          => true,
+                'required'          => false, // Processor omits on successful transactions.
                 'sanitize_callback' => 'sanitize_text_field',
             ),
             'transid'     => array(
@@ -1819,7 +1819,7 @@ function wcpg_gateway_init() {
 			$url_main = $this->paygomainurl . 'order/creditcard/cc_form_enc.php';
 			$zipcode  = preg_replace( '/\s+/', '', $billing['postcode'] );
 
-			$pburl      = '&pburl=' . get_option( 'siteurl' ) . '/wp-content/plugins/secure_plugin/paygo_postback.php';
+			$pburl      = '&pburl=' . get_option( 'siteurl' ) . '/wp-json/digipay/v1/postback';
 				$return_url = ( $this->tocomplete !== '' ) ? $this->tocomplete : $this->get_return_url( $order );
 			$tocomplete = '&tcomplete=' . urlencode( $return_url );
 

@@ -437,8 +437,8 @@ function wcpg_test_postback_url() {
         'response_body' => ''
     );
     
-    // Build the postback URL
-    $postback_url = get_option( 'siteurl' ) . '/wp-content/plugins/secure_plugin/paygo_postback.php';
+    // Build the postback URL (use REST API endpoint)
+    $postback_url = rest_url( 'digipay/v1/postback' );
     $result['url'] = $postback_url;
     
     $start_time = microtime( true );
@@ -728,8 +728,8 @@ function wcpg_test_inbound_connectivity() {
         'tested_url' => ''
     );
     
-    // Build the postback URL
-    $postback_url = get_option( 'siteurl' ) . '/wp-content/plugins/secure_plugin/paygo_postback.php';
+    // Build the postback URL (use REST API endpoint)
+    $postback_url = rest_url( 'digipay/v1/postback' );
     $result['tested_url'] = $postback_url;
     
     // Check if using HTTPS
