@@ -73,18 +73,23 @@ $method = isset( $method ) ? $method : 'email';
 	}
 	$url_rendered = true;
 
-	$the_payment_url = isset( $payment_url ) ? $payment_url : '#';
+	$the_payment_url = ! empty( $payment_url ) ? $payment_url : '';
 	$the_button_text = isset( $button_text ) ? $button_text : __( 'Complete Payment', 'wc-payment-gateway' );
+	$has_url = ! empty( $the_payment_url );
 	?>
 	<div class="wcpg-etransfer-instructions" style="background:#f8f9fa;border:1px solid #e9ecef;border-left:4px solid #28a745;border-radius:4px;padding:20px;margin:20px 0;">
 		<h3 style="margin:0 0 15px;font-size:18px;"><?php esc_html_e( 'Complete Your Payment', 'wc-payment-gateway' ); ?></h3>
-		<p style="margin:0 0 15px;font-size:14px;line-height:1.5;"><?php esc_html_e( 'Click the button below to complete your payment:', 'wc-payment-gateway' ); ?></p>
-		<a href="<?php echo esc_url( $the_payment_url ); ?>" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:12px 30px;font-size:16px;font-weight:bold;text-decoration:none;background:#0071a1;color:#fff;border-radius:4px;"><?php echo esc_html( $the_button_text ); ?></a>
+		<?php if ( $has_url ) : ?>
+			<p style="margin:0 0 15px;font-size:14px;line-height:1.5;"><?php esc_html_e( 'Click the button below to complete your payment:', 'wc-payment-gateway' ); ?></p>
+			<a href="<?php echo esc_url( $the_payment_url ); ?>" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:12px 30px;font-size:16px;font-weight:bold;text-decoration:none;background:#0071a1;color:#fff;border-radius:4px;"><?php echo esc_html( $the_button_text ); ?></a>
+		<?php else : ?>
+			<p style="margin:0;font-size:14px;line-height:1.5;color:#856404;"><?php esc_html_e( 'Your payment link is being prepared. Please check your email or refresh this page in a moment.', 'wc-payment-gateway' ); ?></p>
+		<?php endif; ?>
 	</div>
 	<?php
 
 	// Output popup in footer.
-	add_action( 'wp_footer', function() use ( $the_payment_url, $the_button_text ) {
+	add_action( 'wp_footer', function() use ( $the_payment_url, $the_button_text, $has_url ) {
 		static $footer_url_done = false;
 		if ( $footer_url_done ) return;
 		$footer_url_done = true;
@@ -92,9 +97,13 @@ $method = isset( $method ) ? $method : 'email';
 		<div class="wcpg-etransfer-popup" id="wcpg-etransfer-modal" style="position:fixed;top:0;left:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;z-index:999999;background:rgba(0,0,0,0.6);">
 			<div style="background:#fff;padding:40px;border-radius:8px;max-width:500px;width:90%;position:relative;text-align:center;box-shadow:0 4px 20px rgba(0,0,0,0.2);">
 				<button type="button" id="wcpg-modal-close" style="position:absolute;top:10px;right:10px;width:32px;height:32px;font-size:24px;font-weight:bold;background:#f0f0f0;border:none;border-radius:4px;cursor:pointer;color:#333;line-height:32px;padding:0;">&times;</button>
-				<h3 style="margin:0 0 15px;font-size:22px;">Complete Your Payment</h3>
-				<p style="margin:0 0 20px;font-size:16px;line-height:1.5;">Click the button below to complete your payment:</p>
-				<a href="<?php echo esc_url( $the_payment_url ); ?>" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:15px 40px;font-size:18px;font-weight:bold;text-decoration:none;background:#0071a1;color:#fff;border-radius:4px;"><?php echo esc_html( $the_button_text ); ?></a>
+				<h3 style="margin:0 0 15px;font-size:22px;"><?php esc_html_e( 'Complete Your Payment', 'wc-payment-gateway' ); ?></h3>
+				<?php if ( $has_url ) : ?>
+					<p style="margin:0 0 20px;font-size:16px;line-height:1.5;"><?php esc_html_e( 'Click the button below to complete your payment:', 'wc-payment-gateway' ); ?></p>
+					<a href="<?php echo esc_url( $the_payment_url ); ?>" target="_blank" rel="noopener noreferrer" style="display:inline-block;padding:15px 40px;font-size:18px;font-weight:bold;text-decoration:none;background:#0071a1;color:#fff;border-radius:4px;"><?php echo esc_html( $the_button_text ); ?></a>
+				<?php else : ?>
+					<p style="margin:0;font-size:16px;line-height:1.5;color:#856404;"><?php esc_html_e( 'Your payment link is being prepared. Please check your email or refresh this page in a moment.', 'wc-payment-gateway' ); ?></p>
+				<?php endif; ?>
 			</div>
 		</div>
 		<script>

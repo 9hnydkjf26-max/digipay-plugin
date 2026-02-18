@@ -443,17 +443,17 @@ function wcpg_test_postback_url() {
     
     $start_time = microtime( true );
     
-    // Make request with browser-like user agent to avoid bot blocking
-    // Note: Do NOT send Referer header - direct browser navigation doesn't send one
-    $response = wp_remote_get( 
+    // POST with a dummy session ID — the REST route only accepts POST.
+    // An invalid session triggers the "order does not exist" response we check for.
+    $response = wp_remote_post(
         $postback_url,
         array(
             'timeout' => 15,
             'sslverify' => true,
             'user-agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'headers' => array(
-                'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-            )
+            'body' => array(
+                'session' => '999999999',
+            ),
         )
     );
     
@@ -497,8 +497,26 @@ function wcpg_test_postback_url() {
     }
     
     if ( $http_code === 404 ) {
-        $result['message'] = 'Postback URL not found (404). The plugin file may be missing or moved.';
-        
+        // The REST handler returns 404 with code "order_not_found" for a
+        // non-existent order.  That actually proves the route IS working.
+        if ( strpos( $body, 'order_not_found' ) !== false ) {
+            $result['success'] = true;
+            $result['status']  = 'ok';
+            $result['message'] = 'Postback URL is accessible and working correctly';
+
+            update_option( 'wcpg_postback_url_test', array(
+                'time'             => current_time( 'mysql' ),
+                'success'          => true,
+                'message'          => $result['message'],
+                'http_code'        => $http_code,
+                'response_time_ms' => $result['response_time_ms'],
+            ));
+
+            return $result;
+        }
+
+        $result['message'] = 'Postback URL not found (404). The REST route may not be registered — try flushing permalinks under Settings > Permalinks.';
+
         update_option( 'wcpg_postback_url_test', array(
             'time' => current_time( 'mysql' ),
             'success' => false,
@@ -506,7 +524,7 @@ function wcpg_test_postback_url() {
             'http_code' => $http_code,
             'response_time_ms' => $result['response_time_ms']
         ));
-        
+
         return $result;
     }
     
@@ -728,8 +746,9 @@ function wcpg_test_inbound_connectivity() {
         'tested_url' => ''
     );
     
-    // Build the postback URL (use REST API endpoint)
-    $postback_url = rest_url( 'digipay/v1/postback' );
+    // Build the postback URL (use REST API endpoint).
+    // Append a cache-buster so CDN / caching plugins don't serve a stale 404.
+    $postback_url = add_query_arg( '_cb', time(), rest_url( 'digipay/v1/postback' ) );
     $result['tested_url'] = $postback_url;
     
     // Check if using HTTPS

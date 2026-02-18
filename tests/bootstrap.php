@@ -604,7 +604,7 @@ require_once dirname( __DIR__ ) . '/etransfer/class-etransfer-email.php';
 require_once dirname( __DIR__ ) . '/etransfer/class-etransfer-url.php';
 require_once dirname( __DIR__ ) . '/etransfer/class-etransfer-manual.php';
 require_once dirname( __DIR__ ) . '/etransfer/class-api-client.php';
-require_once dirname( __DIR__ ) . '/etransfer/class-transaction-poller.php';
+require_once dirname( __DIR__ ) . '/etransfer/class-webhook-handler.php';
 
 // Mock WP_Error class for testing if not defined.
 if ( ! class_exists( 'WP_Error' ) ) {
@@ -671,6 +671,7 @@ if ( ! class_exists( 'WP_REST_Request' ) ) {
 		private $json_params = array();
 		private $body_params = array();
 		private $headers = array();
+		private $body = '';
 
 		public function __construct( $json_params = array() ) {
 			$this->json_params = $json_params;
@@ -678,6 +679,22 @@ if ( ! class_exists( 'WP_REST_Request' ) ) {
 
 		public function set_header( $key, $value ) {
 			$this->headers[ strtolower( $key ) ] = $value;
+		}
+
+		public function get_header( $key ) {
+			$key = strtolower( $key );
+			return isset( $this->headers[ $key ] ) ? $this->headers[ $key ] : null;
+		}
+
+		public function set_body( $body ) {
+			$this->body = $body;
+		}
+
+		public function get_body() {
+			if ( ! empty( $this->body ) ) {
+				return $this->body;
+			}
+			return json_encode( $this->json_params );
 		}
 
 		public function get_json_params() {
@@ -703,13 +720,6 @@ if ( ! class_exists( 'WP_REST_Request' ) ) {
 // Alias for test readability.
 if ( ! class_exists( 'WP_REST_Request_Mock' ) ) {
 	class WP_REST_Request_Mock extends WP_REST_Request {
-		public function get_header( $key ) {
-			$key = strtolower( $key );
-			return isset( $this->headers[ $key ] ) ? $this->headers[ $key ] : null;
-		}
-		public function get_body() {
-			return json_encode( $this->get_json_params() );
-		}
 	}
 }
 
@@ -1093,6 +1103,13 @@ if ( ! function_exists( 'register_deactivation_hook' ) ) {
 	 */
 	function register_deactivation_hook( $file, $callback ) {
 		// No-op in tests.
+	}
+}
+
+// Mock wp_unslash function.
+if ( ! function_exists( 'wp_unslash' ) ) {
+	function wp_unslash( $value ) {
+		return is_string( $value ) ? stripslashes( $value ) : $value;
 	}
 }
 

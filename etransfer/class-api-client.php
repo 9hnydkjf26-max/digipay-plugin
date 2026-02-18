@@ -156,8 +156,13 @@ class WCPG_ETransfer_API_Client {
 			return $this->access_token;
 		}
 
+		// Clear any stale cached token before requesting a new one.
+		$this->clear_token();
+
 		$base_url = $this->get_base_url();
 		$endpoint = $base_url . '/oauth/token';
+
+		wc_get_logger()->info( 'E-Transfer OAuth: Requesting token from ' . $endpoint . ' with client_id: ' . substr( $this->client_id, 0, 8 ) . '...', array( 'source' => 'digipay-etransfer' ) );
 
 		$response = wp_remote_post(
 			$endpoint,
@@ -179,13 +184,18 @@ class WCPG_ETransfer_API_Client {
 		);
 
 		if ( is_wp_error( $response ) ) {
+			wc_get_logger()->error( 'E-Transfer OAuth: Request failed - ' . $response->get_error_message(), array( 'source' => 'digipay-etransfer' ) );
 			return $response;
 		}
 
-		$body = json_decode( wp_remote_retrieve_body( $response ), true );
+		$http_code = wp_remote_retrieve_response_code( $response );
+		$body      = json_decode( wp_remote_retrieve_body( $response ), true );
+
+		wc_get_logger()->info( 'E-Transfer OAuth: HTTP ' . $http_code . ' | Response keys: ' . ( is_array( $body ) ? implode( ', ', array_keys( $body ) ) : 'invalid JSON' ), array( 'source' => 'digipay-etransfer' ) );
 
 		if ( ! isset( $body['access_token'] ) || ! isset( $body['expires_in'] ) ) {
-			return new WP_Error( 'invalid_oauth_response', __( 'Invalid response from OAuth server', 'wc-payment-gateway' ) );
+			$error_detail = isset( $body['message'] ) ? $body['message'] : ( isset( $body['error'] ) ? $body['error'] : 'No access_token in response' );
+			return new WP_Error( 'invalid_oauth_response', __( 'OAuth authentication failed: ', 'wc-payment-gateway' ) . $error_detail );
 		}
 
 		$this->save_token( $body['access_token'], $body['expires_in'] );
@@ -218,7 +228,7 @@ class WCPG_ETransfer_API_Client {
 	 * @param string $delivery_method Delivery method (email or url).
 	 * @return array|WP_Error Response from API or WP_Error on failure.
 	 */
-	public function request_etransfer_link( $order_data, $delivery_method = 'Email' ) {
+	public function request_etransfer_link( $order_data, $delivery_method = 'Email', $is_retry = false ) {
 		$endpoint = $this->api_endpoint . '/payment-types/interac/e-transfers/request-etransfer-link';
 
 		$headers = $this->get_headers();
@@ -240,6 +250,8 @@ class WCPG_ETransfer_API_Client {
 			$body['delivery_method'] = 'Email';
 		}
 
+		wc_get_logger()->info( 'E-Transfer API: POST ' . $endpoint . ' | retry=' . ( $is_retry ? 'yes' : 'no' ), array( 'source' => 'digipay-etransfer' ) );
+
 		$response = wp_remote_post(
 			$endpoint,
 			array(
@@ -253,8 +265,16 @@ class WCPG_ETransfer_API_Client {
 			return $response;
 		}
 
+		$http_code     = wp_remote_retrieve_response_code( $response );
 		$response_body = wp_remote_retrieve_body( $response );
 		$data          = json_decode( $response_body, true );
+
+		// If unauthenticated and haven't retried yet, clear token cache and retry once.
+		if ( ! $is_retry && ( 401 === $http_code || ( isset( $data['message'] ) && false !== stripos( $data['message'], 'unauthenticated' ) ) ) ) {
+			wc_get_logger()->info( 'E-Transfer API: Got Unauthenticated (HTTP ' . $http_code . '), clearing token and retrying...', array( 'source' => 'digipay-etransfer' ) );
+			$this->clear_token();
+			return $this->request_etransfer_link( $order_data, $delivery_method, true );
+		}
 
 		if ( json_last_error() !== JSON_ERROR_NONE ) {
 			return new WP_Error( 'invalid_response', __( 'Invalid response from payment gateway', 'wc-payment-gateway' ) );
@@ -272,70 +292,6 @@ class WCPG_ETransfer_API_Client {
 	private function sanitize_description( $description ) {
 		// Remove characters not allowed by the API.
 		return preg_replace( '/[^a-zA-Z0-9\s.#,$@\']/', ' ', $description );
-	}
-
-	/**
-	 * Get transactions by references.
-	 *
-	 * @param array $references Array of transaction references.
-	 * @param int   $per_page   Results per page.
-	 * @return array|WP_Error Array of transactions or WP_Error on failure.
-	 */
-	public function get_transactions( $references, $per_page = 50 ) {
-		$headers = $this->get_headers();
-		if ( is_wp_error( $headers ) ) {
-			return $headers;
-		}
-
-		$all_items    = array();
-		$current_page = 1;
-
-		do {
-			$query_params = array(
-				'account_uuid' => $this->account_uuid,
-				'per_page'     => $per_page,
-				'page'         => $current_page,
-			);
-
-			// Add references as array format.
-			foreach ( $references as $reference ) {
-				$query_params['references[]'] = $reference;
-			}
-
-			$endpoint = $this->api_endpoint . '/transactions?' . http_build_query( $query_params, '', '&' );
-
-			$response = wp_remote_get(
-				$endpoint,
-				array(
-					'headers' => $headers,
-					'timeout' => 30,
-				)
-			);
-
-			if ( is_wp_error( $response ) ) {
-				return $response;
-			}
-
-			$response_body = wp_remote_retrieve_body( $response );
-			$data          = json_decode( $response_body, true );
-
-			if ( json_last_error() !== JSON_ERROR_NONE ) {
-				return new WP_Error( 'invalid_response', __( 'Invalid response from payment gateway', 'wc-payment-gateway' ) );
-			}
-
-			if ( ! isset( $data['success'] ) || ! $data['success'] || ! isset( $data['data']['items'] ) ) {
-				return new WP_Error( 'invalid_response', __( 'Invalid response structure from payment gateway', 'wc-payment-gateway' ) );
-			}
-
-			$all_items = array_merge( $all_items, $data['data']['items'] );
-
-			$pagination     = $data['data']['pagination'];
-			$has_more_pages = $pagination['current_page'] < $pagination['total_pages'];
-			$current_page++;
-
-		} while ( $has_more_pages );
-
-		return $all_items;
 	}
 
 	/**

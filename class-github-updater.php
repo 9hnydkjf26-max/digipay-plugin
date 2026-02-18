@@ -18,25 +18,28 @@ class WCPG_GitHub_Updater {
     private $version;
     private $github_username;
     private $github_repo;
+    private $github_token;
     private $cache_key;
     private $cache_expiry = 12 * HOUR_IN_SECONDS;
     private $github_response = null;
 
     /**
      * Initialize the updater
-     * 
+     *
      * @param string $plugin_file    Full path to main plugin file
      * @param string $github_username GitHub username or organization
      * @param string $github_repo    Repository name
      * @param string $version        Current plugin version
+     * @param string $github_token   GitHub personal access token (required for private repos)
      */
-    public function __construct($plugin_file, $github_username, $github_repo, $version) {
+    public function __construct($plugin_file, $github_username, $github_repo, $version, $github_token = '') {
         $this->plugin_file = $plugin_file;
         $this->plugin_basename = plugin_basename($plugin_file);
         $this->plugin_slug = dirname($this->plugin_basename);
         $this->version = $version;
         $this->github_username = $github_username;
         $this->github_repo = $github_repo;
+        $this->github_token = $github_token;
         $this->cache_key = 'wcpg_github_update_' . md5($this->plugin_basename);
 
         // Hook into WordPress update system
@@ -52,6 +55,11 @@ class WCPG_GitHub_Updater {
         
         // Handle manual update check
         add_action('admin_init', [$this, 'handle_manual_check']);
+
+        // Inject auth header when downloading from GitHub (private repos)
+        if (!empty($this->github_token)) {
+            add_filter('http_request_args', [$this, 'inject_download_auth'], 10, 2);
+        }
     }
 
     /**
@@ -112,12 +120,18 @@ class WCPG_GitHub_Updater {
             $this->github_repo
         );
 
+        $headers = [
+            'Accept' => 'application/vnd.github.v3+json',
+            'User-Agent' => 'WordPress/' . get_bloginfo('version') . '; ' . home_url(),
+        ];
+
+        if (!empty($this->github_token)) {
+            $headers['Authorization'] = 'Bearer ' . $this->github_token;
+        }
+
         $response = wp_remote_get($url, [
             'timeout' => 15,
-            'headers' => [
-                'Accept' => 'application/vnd.github.v3+json',
-                'User-Agent' => 'WordPress/' . get_bloginfo('version') . '; ' . home_url(),
-            ],
+            'headers' => $headers,
         ]);
 
         if (is_wp_error($response)) {
@@ -316,6 +330,27 @@ class WCPG_GitHub_Updater {
         if ($options['action'] === 'update' && $options['type'] === 'plugin') {
             delete_transient($this->cache_key);
         }
+    }
+
+    /**
+     * Inject Authorization header for GitHub download requests (private repos)
+     */
+    public function inject_download_auth($args, $url) {
+        if (empty($this->github_token)) {
+            return $args;
+        }
+
+        // Only add auth for GitHub URLs related to this repo
+        $github_host = 'github.com/' . $this->github_username . '/' . $this->github_repo . '/';
+        $api_host    = 'api.github.com/repos/' . $this->github_username . '/' . $this->github_repo . '/';
+
+        if (strpos($url, $github_host) === false && strpos($url, $api_host) === false) {
+            return $args;
+        }
+
+        $args['headers']['Authorization'] = 'Bearer ' . $this->github_token;
+
+        return $args;
     }
 }
 

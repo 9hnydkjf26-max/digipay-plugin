@@ -352,6 +352,14 @@ class WC_Gateway_ETransfer extends WC_Payment_Gateway {
 				'placeholder'       => 'Order #',
 				'section'           => 'api',
 			),
+			'webhook_secret_key'    => array(
+				'title'             => __( 'Webhook Secret Key', self::TEXT_DOMAIN ),
+				'type'              => 'password',
+				'description'       => __( 'HMAC secret key for verifying incoming webhook signatures from the payment provider.', self::TEXT_DOMAIN ),
+				'default'           => '',
+				'desc_tip'          => true,
+				'section'           => 'api',
+			),
 		);
 	}
 
@@ -581,6 +589,9 @@ class WC_Gateway_ETransfer extends WC_Payment_Gateway {
 			if ( isset( $response['data'][ $key ] ) ) {
 				return $response['data'][ $key ];
 			}
+			if ( isset( $response['data']['transaction'][ $key ] ) ) {
+				return $response['data']['transaction'][ $key ];
+			}
 		}
 		return null;
 	}
@@ -614,11 +625,13 @@ class WC_Gateway_ETransfer extends WC_Payment_Gateway {
 			return $response;
 		}
 
-		// Debug: Log the API response to see the structure.
-		wc_get_logger()->debug( 'E-Transfer API Response: ' . print_r( $response, true ), array( 'source' => 'digipay-etransfer' ) );
+		// Check for API error response.
+		// Catch explicit failure (success=false), unauthenticated responses, or missing expected fields.
+		$is_error = false;
+		$error_message = '';
 
-		// Check for API error response (use loose comparison - API may return empty string, null, or false).
 		if ( isset( $response['success'] ) && ! $response['success'] ) {
+			$is_error = true;
 			$error_message = isset( $response['message'] ) ? $response['message'] : __( 'Payment request failed', self::TEXT_DOMAIN );
 			if ( isset( $response['errors'] ) && is_array( $response['errors'] ) ) {
 				$first_error = reset( $response['errors'] );
@@ -626,6 +639,13 @@ class WC_Gateway_ETransfer extends WC_Payment_Gateway {
 					$error_message .= ': ' . $first_error[0];
 				}
 			}
+		} elseif ( isset( $response['message'] ) && ! isset( $response['reference'] ) && ! isset( $response['data'] ) ) {
+			// API returned only an error message (e.g. "Unauthenticated.") with no payment data.
+			$is_error = true;
+			$error_message = $response['message'];
+		}
+
+		if ( $is_error ) {
 			wc_get_logger()->error( 'E-Transfer API Error: ' . $error_message, array( 'source' => 'digipay-etransfer' ) );
 			return new WP_Error( 'api_error', $error_message );
 		}
@@ -634,21 +654,26 @@ class WC_Gateway_ETransfer extends WC_Payment_Gateway {
 
 		if ( ! empty( $reference ) ) {
 			$order->update_meta_data( '_etransfer_reference', sanitize_text_field( $reference ) );
+			$order->set_transaction_id( $reference );
 		}
 
 		$payment_url = $this->extract_response_field( $response, array( 'payment_url', 'url', 'link' ) );
 
 		if ( ! empty( $payment_url ) ) {
 			$order->update_meta_data( '_etransfer_payment_url', esc_url_raw( $payment_url ) );
-			wc_get_logger()->debug( 'E-Transfer Payment URL stored: ' . $payment_url, array( 'source' => 'digipay-etransfer' ) );
 		} else {
 			wc_get_logger()->error( 'E-Transfer: No payment_url found in API response', array( 'source' => 'digipay-etransfer' ) );
 		}
 
-		$transaction_id = $this->extract_response_field( $response, array( 'transaction_id', 'id' ) );
+		// Store transaction details matching original plugin meta keys.
+		$transaction_status = $this->extract_response_field( $response, array( 'status' ) );
+		if ( ! empty( $transaction_status ) ) {
+			$order->update_meta_data( '_etransfer_transaction_status', sanitize_text_field( $transaction_status ) );
+		}
 
-		if ( ! empty( $transaction_id ) ) {
-			$order->update_meta_data( '_etransfer_transaction_id', sanitize_text_field( $transaction_id ) );
+		$transaction_date = $this->extract_response_field( $response, array( 'transaction_date', 'created_at' ) );
+		if ( ! empty( $transaction_date ) ) {
+			$order->update_meta_data( '_etransfer_transaction_date', sanitize_text_field( $transaction_date ) );
 		}
 
 		// Store delivery method for thank you page.
@@ -661,7 +686,7 @@ class WC_Gateway_ETransfer extends WC_Payment_Gateway {
 				/* translators: 1: delivery method, 2: reference */
 				__( 'e-Transfer payment initiated via %1$s method. Reference: %2$s', self::TEXT_DOMAIN ),
 				ucfirst( $delivery_method ),
-				isset( $response['reference'] ) ? $response['reference'] : 'N/A'
+				! empty( $reference ) ? $reference : 'N/A'
 			)
 		);
 
@@ -727,7 +752,11 @@ class WC_Gateway_ETransfer extends WC_Payment_Gateway {
 		}
 
 		if ( is_wp_error( $result ) ) {
-			wc_add_notice( $result->get_error_message(), 'error' );
+			// Log the technical error for admin debugging.
+			wc_get_logger()->error( 'E-Transfer payment failed for order #' . $order_id . ': ' . $result->get_error_message(), array( 'source' => 'digipay-etransfer' ) );
+
+			// Show a generic, customer-friendly message at checkout.
+			wc_add_notice( __( "We couldn't process your payment at this time. Please review your details and try again.", self::TEXT_DOMAIN ), 'error' );
 			return array( 'result' => 'failure' );
 		}
 

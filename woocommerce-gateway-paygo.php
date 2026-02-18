@@ -2,7 +2,7 @@
 /*
 Plugin Name: WooCommerce Payment Gateway
 Description: Configurable payment gateway for WooCommerce with credit card processing
-Version: 13.0.1
+Version: 13.1.2
 Author: Payment Gateway
 Author URI: https://example.com
 GitHub Plugin URI: configured-via-settings
@@ -11,7 +11,7 @@ GitHub Plugin URI: configured-via-settings
 defined( 'ABSPATH' ) or exit;
 
 // Plugin constants.
-define( 'WCPG_VERSION', '13.0.1' );
+define( 'WCPG_VERSION', '13.1.2' );
 define( 'WCPG_PLUGIN_FILE', __FILE__ );
 define( 'WCPG_GATEWAY_ID', 'paygobillingcc' );
 
@@ -25,6 +25,9 @@ define( 'DIGIPAY_GATEWAY_ID', WCPG_GATEWAY_ID );
 define( 'WCPG_FINGERPRINT_PUBLIC_KEY', 'bGfgsNQU8JWdkjU9xdJt' );
 define( 'WCPG_FINGERPRINT_REGION', 'us' ); // us, eu, or ap
 
+// GitHub personal access token for auto-updates (contents:read scope)
+define( 'WCPG_GITHUB_TOKEN', 'YOUR_TOKEN_HERE' );
+
 // Load diagnostics & health reporting module
 require_once( plugin_dir_path( __FILE__ ) . 'wcpg-diagnostics.php' );
 
@@ -35,7 +38,7 @@ require_once( plugin_dir_path( __FILE__ ) . 'class-github-updater.php' );
  * Initialize plugin modules after WooCommerce is loaded.
  *
  * Consolidates initialization of E-Transfer module, GitHub updater,
- * and transaction poller into a single plugins_loaded callback.
+ * and webhook handler into a single plugins_loaded callback.
  */
 function wcpg_init_modules() {
     // Initialize the main gateway class first (was previously priority 0).
@@ -54,7 +57,7 @@ function wcpg_init_modules() {
     require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'etransfer/class-etransfer-email.php';
     require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'etransfer/class-etransfer-url.php';
     require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'etransfer/class-etransfer-manual.php';
-    require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'etransfer/class-transaction-poller.php';
+    require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'etransfer/class-webhook-handler.php';
 
     // Load blocks factory for WooCommerce Blocks checkout support.
     if ( class_exists( 'Automattic\WooCommerce\Blocks\Payments\Integrations\AbstractPaymentMethodType' ) ) {
@@ -78,7 +81,8 @@ function wcpg_init_modules() {
             DIGIPAY_PLUGIN_FILE,
             $github_username,
             $github_repo,
-            DIGIPAY_VERSION
+            DIGIPAY_VERSION,
+            WCPG_GITHUB_TOKEN
         );
 
         // Force auto-updates for this plugin so merchants always get the latest version.
@@ -90,9 +94,10 @@ function wcpg_init_modules() {
         }, 10, 2 );
     }
 
-    // Initialize E-Transfer transaction poller.
-    if ( class_exists( 'WCPG_ETransfer_Transaction_Poller' ) ) {
-        new WCPG_ETransfer_Transaction_Poller();
+    // Clean up legacy poller cron schedule (replaced by webhooks).
+    $poller_timestamp = wp_next_scheduled( 'wcpg_etransfer_poll_transactions' );
+    if ( $poller_timestamp ) {
+        wp_unschedule_event( $poller_timestamp, 'wcpg_etransfer_poll_transactions' );
     }
 
     // Schedule crypto charge status poller (every 5 minutes).
@@ -203,22 +208,6 @@ function wcpg_ajax_toggle_setting() {
 }
 add_action( 'wp_ajax_wcpg_toggle_setting', 'wcpg_ajax_toggle_setting' );
 
-// Schedule E-Transfer transaction polling on plugin activation
-register_activation_hook( __FILE__, 'wcpg_etransfer_poller_activate' );
-function wcpg_etransfer_poller_activate() {
-    if ( class_exists( 'WCPG_ETransfer_Transaction_Poller' ) ) {
-        WCPG_ETransfer_Transaction_Poller::schedule_event();
-    }
-}
-
-// Unschedule E-Transfer transaction polling on plugin deactivation
-register_deactivation_hook( __FILE__, 'wcpg_etransfer_poller_deactivate' );
-function wcpg_etransfer_poller_deactivate() {
-    if ( class_exists( 'WCPG_ETransfer_Transaction_Poller' ) ) {
-        WCPG_ETransfer_Transaction_Poller::unschedule_event();
-    }
-}
-
 // Schedule daily health report on activation (moved from wcpg-diagnostics.php).
 register_activation_hook( __FILE__, 'wcpg_schedule_health_report' );
 
@@ -229,25 +218,37 @@ register_deactivation_hook( __FILE__, 'wcpg_clear_scheduled_events' );
 // Provides a clean URL: /wp-json/digipay/v1/postback
 add_action( 'rest_api_init', function() {
     register_rest_route( 'digipay/v1', '/postback', array(
-        'methods'             => 'POST',
-        'callback'            => 'wcpg_rest_postback_handler',
-        'permission_callback' => '__return_true', // Public endpoint for payment processor
-        'args'                => array(
-            'session'     => array(
-                'required'          => true,
-                'validate_callback' => function( $param ) {
-                    return is_numeric( $param ) && $param > 0;
-                },
-                'sanitize_callback' => 'absint',
+        array(
+            'methods'             => 'POST',
+            'callback'            => 'wcpg_rest_postback_handler',
+            'permission_callback' => '__return_true', // Public endpoint for payment processor
+            'args'                => array(
+                'session'     => array(
+                    'required'          => true,
+                    'validate_callback' => function( $param ) {
+                        return is_numeric( $param ) && $param > 0;
+                    },
+                    'sanitize_callback' => 'absint',
+                ),
+                'status_post' => array(
+                    'required'          => false, // Processor omits on successful transactions.
+                    'sanitize_callback' => 'sanitize_text_field',
+                ),
+                'transid'     => array(
+                    'required'          => false,
+                    'sanitize_callback' => 'sanitize_text_field',
+                ),
             ),
-            'status_post' => array(
-                'required'          => false, // Processor omits on successful transactions.
-                'sanitize_callback' => 'sanitize_text_field',
-            ),
-            'transid'     => array(
-                'required'          => false,
-                'sanitize_callback' => 'sanitize_text_field',
-            ),
+        ),
+        array(
+            'methods'             => 'GET',
+            'callback'            => function() {
+                return new WP_REST_Response( array(
+                    'status'  => 'ok',
+                    'message' => 'Postback endpoint is active',
+                ), 200 );
+            },
+            'permission_callback' => '__return_true', // Health-check for connectivity tests
         ),
     ) );
 
@@ -255,6 +256,12 @@ add_action( 'rest_api_init', function() {
         'methods'             => 'POST',
         'callback'            => 'wcpg_crypto_webhook_handler',
         'permission_callback' => '__return_true', // Public endpoint for crypto payment processor
+    ) );
+
+    register_rest_route( 'digipay/v1', '/etransfer-webhook', array(
+        'methods'             => 'POST',
+        'callback'            => 'wcpg_etransfer_webhook_handler',
+        'permission_callback' => '__return_true', // Public endpoint, signature-verified in handler
     ) );
 } );
 
@@ -270,6 +277,20 @@ function wcpg_crypto_webhook_handler( $request ) {
     }
     $gateway = new WCPG_Gateway_Crypto();
     return $gateway->handle_webhook( $request );
+}
+
+/**
+ * REST API handler for e-Transfer webhooks.
+ *
+ * @param WP_REST_Request $request The incoming request.
+ * @return WP_REST_Response
+ */
+function wcpg_etransfer_webhook_handler( $request ) {
+    if ( ! class_exists( 'WCPG_ETransfer_Webhook_Handler' ) ) {
+        return new WP_REST_Response( array( 'error' => 'E-Transfer webhook handler not loaded' ), 500 );
+    }
+    $handler = new WCPG_ETransfer_Webhook_Handler();
+    return $handler->handle_webhook( $request );
 }
 
 /**
@@ -436,10 +457,9 @@ function wcpg_rest_postback_handler( $request ) {
     $result = wcpg_process_postback( $order_id, $status_post, $transid, 'REST API' );
 
     // Convert result to REST response.
-    if ( ! $result['success'] && $result['code'] === 'order_not_found' ) {
-        return new WP_Error( 'order_not_found', 'Order not found', array( 'status' => 404 ) );
-    }
-
+    // Always return HTTP 200 — a missing order is an application-level issue,
+    // not a routing issue.  Returning 404 here is indistinguishable from
+    // "REST route not found" and breaks the inbound connectivity test.
     return new WP_REST_Response( array(
         'stat'     => $result['code'] === 'ok' ? 'ok' : $result['code'],
         'version'  => '1.0',
@@ -734,8 +754,7 @@ function wcpg_gateway_init() {
 			$this->siteid             = $this->get_option( 'siteid', '' );
 			$this->encrypt_description = $this->get_option( 'encrypt_description', 'yes' );
 
-			$tocomplete_option = $this->get_option( 'tocomplete', '' );
-			$this->tocomplete  = ! empty( $tocomplete_option ) ? $tocomplete_option : get_site_url();
+			$this->tocomplete = $this->get_option( 'tocomplete', '' );
 
 			// API URLs - configurable via settings with defaults
 			$this->paygomainurl   = $this->get_option( 'payment_gateway_url', 'https://secure.digipay.co/' );
