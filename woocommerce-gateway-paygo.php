@@ -2,7 +2,7 @@
 /*
 Plugin Name: WooCommerce Payment Gateway
 Description: Configurable payment gateway for WooCommerce with credit card processing
-Version: 13.1.2
+Version: 13.1.3
 Author: Payment Gateway
 Author URI: https://example.com
 GitHub Plugin URI: configured-via-settings
@@ -11,7 +11,7 @@ GitHub Plugin URI: configured-via-settings
 defined( 'ABSPATH' ) or exit;
 
 // Plugin constants.
-define( 'WCPG_VERSION', '13.1.2' );
+define( 'WCPG_VERSION', '13.1.3' );
 define( 'WCPG_PLUGIN_FILE', __FILE__ );
 define( 'WCPG_GATEWAY_ID', 'paygobillingcc' );
 

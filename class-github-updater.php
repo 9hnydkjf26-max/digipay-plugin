@@ -57,7 +57,7 @@ class WCPG_GitHub_Updater {
         add_action('admin_init', [$this, 'handle_manual_check']);
 
         // Inject auth header when downloading from GitHub (private repos)
-        if (!empty($this->github_token)) {
+        if (!empty($this->github_token) && $this->github_token !== 'YOUR_TOKEN_HERE') {
             add_filter('http_request_args', [$this, 'inject_download_auth'], 10, 2);
         }
     }
@@ -125,7 +125,7 @@ class WCPG_GitHub_Updater {
             'User-Agent' => 'WordPress/' . get_bloginfo('version') . '; ' . home_url(),
         ];
 
-        if (!empty($this->github_token)) {
+        if (!empty($this->github_token) && $this->github_token !== 'YOUR_TOKEN_HERE') {
             $headers['Authorization'] = 'Bearer ' . $this->github_token;
         }
 
