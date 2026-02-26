@@ -251,4 +251,41 @@ jQuery(document).ready(function($) {
 		$enableManual.on('change', toggleETransferSections);
 		toggleETransferSections();
 	}
+
+	// --- Reset to Defaults button ---
+	$('#wcpg-reset-defaults-btn').on('click', function() {
+		if (!confirm('Are you sure you want to reset ALL gateway settings to their defaults? This cannot be undone.')) {
+			return;
+		}
+
+		var $btn = $(this);
+		var $status = $('#wcpg-reset-status');
+
+		$btn.prop('disabled', true).text('Resetting...');
+		$status.text('');
+
+		$.ajax({
+			url: wcpgAdminSettings.ajaxUrl,
+			type: 'POST',
+			data: {
+				action: 'wcpg_reset_defaults',
+				nonce: wcpgAdminSettings.resetNonce
+			},
+			success: function(response) {
+				$btn.prop('disabled', false).text('Reset All Settings to Defaults');
+				if (response.success) {
+					$status.html('<span style="color: green;">\u2713 All settings reset to defaults. Reloading\u2026</span>');
+					setTimeout(function() {
+						window.location.reload();
+					}, 1000);
+				} else {
+					$status.html('<span style="color: red;">' + (response.data || 'Reset failed.') + '</span>');
+				}
+			},
+			error: function() {
+				$btn.prop('disabled', false).text('Reset All Settings to Defaults');
+				$status.html('<span style="color: red;">Reset failed. Please try again.</span>');
+			}
+		});
+	});
 });

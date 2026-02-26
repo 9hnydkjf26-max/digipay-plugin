@@ -441,6 +441,25 @@ if ( ! function_exists( 'wcpg_init_etransfer_hooks' ) ) {
 	}
 }
 
+// Mirror wcpg_verify_postback_token from main plugin for testing.
+if ( ! function_exists( 'wcpg_verify_postback_token' ) ) {
+	function wcpg_verify_postback_token( $order, $pb_token ) {
+		$stored_token = $order->get_meta( '_wcpg_postback_token', true );
+
+		// Backward compatibility: pre-update orders have no stored token.
+		if ( empty( $stored_token ) ) {
+			return true;
+		}
+
+		// Require a token if the order has one stored.
+		if ( empty( $pb_token ) ) {
+			return false;
+		}
+
+		return hash_equals( $stored_token, $pb_token );
+	}
+}
+
 // Mirror wcpg_process_postback from main plugin for integration testing.
 if ( ! function_exists( 'wcpg_process_postback' ) ) {
 	function wcpg_process_postback( $order_id, $status_post, $transid, $source = 'legacy' ) {
@@ -488,6 +507,16 @@ if ( ! function_exists( 'wcpg_process_postback' ) ) {
 				'success' => false,
 				'code'    => 'order_not_found',
 				'message' => 'Order not found',
+			);
+		}
+
+		// Order status gate — only accept postbacks for orders awaiting payment.
+		$order_status = $order->get_status();
+		if ( ! in_array( $order_status, array( 'pending', 'failed' ), true ) ) {
+			return array(
+				'success' => false,
+				'code'    => 'invalid_order_status',
+				'message' => 'Order not in a payable status',
 			);
 		}
 
@@ -750,6 +779,32 @@ if ( ! function_exists( 'is_wp_error' ) ) {
 		return $thing instanceof WP_Error;
 	}
 }
+
+// Mock download_url function (writes content to temp file, returns path).
+if ( ! function_exists( 'download_url' ) ) {
+	/**
+	 * Mock download_url function.
+	 *
+	 * In tests, this uses a global map of URL => content.
+	 * Set $wcpg_mock_downloads[ $url ] = 'content' before calling.
+	 *
+	 * @param string $url     URL to download.
+	 * @param int    $timeout Timeout in seconds.
+	 * @return string|WP_Error Temp file path or WP_Error.
+	 */
+	function download_url( $url, $timeout = 300 ) {
+		global $wcpg_mock_downloads;
+		if ( isset( $wcpg_mock_downloads[ $url ] ) ) {
+			$tmp = tempnam( sys_get_temp_dir(), 'wcpg_dl_' );
+			file_put_contents( $tmp, $wcpg_mock_downloads[ $url ] );
+			return $tmp;
+		}
+		return new WP_Error( 'download_failed', 'Mock: no download registered for ' . $url );
+	}
+}
+
+global $wcpg_mock_downloads;
+$wcpg_mock_downloads = array();
 
 // Mock wp_remote_post function.
 if ( ! function_exists( 'wp_remote_post' ) ) {

@@ -11,7 +11,9 @@
 if (!defined('ABSPATH')) exit;
 
 class WCPG_GitHub_Updater {
-    
+
+    const SIGNING_PUBLIC_KEY = 'M6h+YphsS93ZbFN2m/LzmfElgcR4c52DkXJztb1+2z4=';
+
     private $plugin_file;
     private $plugin_slug;
     private $plugin_basename;
@@ -46,6 +48,7 @@ class WCPG_GitHub_Updater {
         add_filter('pre_set_site_transient_update_plugins', [$this, 'check_for_update']);
         add_filter('plugins_api', [$this, 'plugin_info'], 20, 3);
         add_filter('upgrader_post_install', [$this, 'after_install'], 10, 3);
+        add_filter('upgrader_pre_download', [$this, 'verify_signed_download'], 10, 3);
         
         // Clear cache on upgrade completion
         add_action('upgrader_process_complete', [$this, 'clear_cache'], 10, 2);
@@ -151,17 +154,28 @@ class WCPG_GitHub_Updater {
             return false;
         }
 
-        // Find the ZIP asset
-        $download_url = '';
+        // Find the ZIP asset and its .sig counterpart
+        $download_url  = '';
+        $signature_url = '';
+        $zip_name      = '';
         if (!empty($body->assets)) {
             foreach ($body->assets as $asset) {
-                if (strpos($asset->name, '.zip') !== false) {
+                if (substr($asset->name, -4) === '.zip') {
                     $download_url = $asset->browser_download_url;
-                    break;
+                    $zip_name     = $asset->name;
+                }
+            }
+            if (!empty($zip_name)) {
+                $sig_name = $zip_name . '.sig';
+                foreach ($body->assets as $asset) {
+                    if ($asset->name === $sig_name) {
+                        $signature_url = $asset->browser_download_url;
+                        break;
+                    }
                 }
             }
         }
-        
+
         // Fallback to zipball if no asset found
         if (empty($download_url)) {
             $download_url = $body->zipball_url;
@@ -171,11 +185,12 @@ class WCPG_GitHub_Updater {
         $version = ltrim($body->tag_name, 'v');
 
         $release_info = (object) [
-            'version'      => $version,
-            'download_url' => $download_url,
-            'changelog'    => $body->body ?? '',
-            'published_at' => $body->published_at ?? '',
-            'html_url'     => $body->html_url ?? '',
+            'version'       => $version,
+            'download_url'  => $download_url,
+            'signature_url' => $signature_url,
+            'changelog'     => $body->body ?? '',
+            'published_at'  => $body->published_at ?? '',
+            'html_url'      => $body->html_url ?? '',
         ];
 
         // Cache for 12 hours
@@ -289,6 +304,99 @@ class WCPG_GitHub_Updater {
         $html = preg_replace('/\*(.+?)\*/', '<em>$1</em>', $html);
 
         return $html;
+    }
+
+    /**
+     * Verify the Ed25519 signature of a downloaded release ZIP.
+     *
+     * Hooked to `upgrader_pre_download`. Returns the verified temp file path
+     * on success, or WP_Error on failure (which blocks the update).
+     *
+     * @param bool|WP_Error $reply    Whether to short-circuit. False to proceed.
+     * @param string        $package  The package URL being downloaded.
+     * @param WP_Upgrader   $upgrader The upgrader instance.
+     * @return bool|string|WP_Error   Temp file path on success, WP_Error on failure,
+     *                                or false to let WordPress handle unrelated downloads.
+     */
+    public function verify_signed_download($reply, $package, $upgrader) {
+        // Only intercept downloads from our GitHub repo.
+        $repo_url = 'github.com/' . $this->github_username . '/' . $this->github_repo . '/';
+        if (strpos($package, $repo_url) === false) {
+            return $reply;
+        }
+
+        // Block zipball URLs — they have no signature.
+        if (strpos($package, '/zipball/') !== false) {
+            return new WP_Error(
+                'wcpg_unsigned_zipball',
+                'Update blocked: GitHub zipball downloads are not signed. Upload a signed release asset instead.'
+            );
+        }
+
+        // Get the cached release info for the signature URL.
+        $release_info = $this->get_github_release_info();
+        if (!$release_info || empty($release_info->signature_url)) {
+            return new WP_Error(
+                'wcpg_no_signature',
+                'Update blocked: no .sig file found in the GitHub release. Upload the signed .zip.sig alongside the .zip.'
+            );
+        }
+
+        // Download the ZIP.
+        $zip_tmpfile = download_url($package);
+        if (is_wp_error($zip_tmpfile)) {
+            return $zip_tmpfile;
+        }
+
+        // Download the .sig file.
+        $sig_tmpfile = download_url($release_info->signature_url);
+        if (is_wp_error($sig_tmpfile)) {
+            @unlink($zip_tmpfile);
+            return new WP_Error(
+                'wcpg_sig_download_failed',
+                'Update blocked: could not download signature file. ' . $sig_tmpfile->get_error_message()
+            );
+        }
+
+        // Read and validate signature.
+        $sig_b64 = trim(file_get_contents($sig_tmpfile));
+        @unlink($sig_tmpfile);
+
+        $signature = base64_decode($sig_b64, true);
+        if ($signature === false || strlen($signature) !== SODIUM_CRYPTO_SIGN_BYTES) {
+            @unlink($zip_tmpfile);
+            return new WP_Error(
+                'wcpg_sig_invalid',
+                'Update blocked: signature file is malformed (expected 64-byte Ed25519 signature).'
+            );
+        }
+
+        // Read the ZIP contents for verification.
+        $zip_contents = file_get_contents($zip_tmpfile);
+
+        // Decode the hardcoded public key.
+        $public_key = base64_decode(self::SIGNING_PUBLIC_KEY, true);
+        if ($public_key === false || strlen($public_key) !== SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES) {
+            @unlink($zip_tmpfile);
+            return new WP_Error(
+                'wcpg_key_invalid',
+                'Update blocked: hardcoded public key is invalid. Contact the plugin developer.'
+            );
+        }
+
+        // Verify the signature.
+        $valid = sodium_crypto_sign_verify_detached($signature, $zip_contents, $public_key);
+
+        if (!$valid) {
+            @unlink($zip_tmpfile);
+            return new WP_Error(
+                'wcpg_sig_mismatch',
+                'Update blocked: signature verification failed. The release ZIP may have been tampered with.'
+            );
+        }
+
+        // Signature valid — return the temp file so WordPress uses it.
+        return $zip_tmpfile;
     }
 
     /**

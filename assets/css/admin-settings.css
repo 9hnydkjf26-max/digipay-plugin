@@ -230,7 +230,19 @@
 .wcpg-tabs-left,
 .wcpg-tabs-right {
 	display: flex;
+	align-items: center;
 	gap: 0;
+}
+
+/* Version badge */
+.wcpg-version-badge {
+	font-size: 11px;
+	color: #646970;
+	background: #f0f0f1;
+	padding: 3px 8px;
+	border-radius: 3px;
+	margin-left: 8px;
+	white-space: nowrap;
 }
 
 /* Collapsible Sections */

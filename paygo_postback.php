@@ -106,6 +106,19 @@ if ( empty( $order_id ) || $order_id < 1 ) {
 }
 
 // ============================================================
+// POSTBACK TOKEN VERIFICATION
+// ============================================================
+$pb_token = isset( $_REQUEST['pb_token'] ) ? sanitize_text_field( $_REQUEST['pb_token'] ) : '';
+if ( function_exists( 'wcpg_verify_postback_token' ) ) {
+    $token_order = wc_get_order( $order_id );
+    if ( $token_order && ! wcpg_verify_postback_token( $token_order, $pb_token ) ) {
+        wcpg_secure_log( "Invalid postback token for order {$order_id}", 'security' );
+        echo 'Postback received';
+        exit;
+    }
+}
+
+// ============================================================
 // BOT PROTECTION
 // ============================================================
 function wcpg_block_bad_bots() {

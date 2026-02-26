@@ -360,21 +360,15 @@ class WC_Gateway_ETransfer extends WC_Payment_Gateway {
 				'desc_tip'          => true,
 				'section'           => 'api',
 			),
-		);
-	}
-
-	/**
-	 * Get default instructions template.
-	 *
-	 * @return string
-	 */
-	public function get_default_instructions() {
-		return __(
-			'Please send an Interac e-Transfer to complete your order:<br/><br/>' .
-			'<strong>Security Question:</strong> What is order number {1}?<br/>' .
-			'<strong>Security Answer:</strong> {2}<br/><br/>' .
-			'Thank you for your order!',
-			self::TEXT_DOMAIN
+			'debug_mode'            => array(
+				'title'             => __( 'Debug Mode', self::TEXT_DOMAIN ),
+				'type'              => 'checkbox',
+				'label'             => __( 'Log API responses to order notes', self::TEXT_DOMAIN ),
+				'description'       => __( 'When enabled, the full API response from e-Transfer requests is saved as a private order note for debugging.', self::TEXT_DOMAIN ),
+				'default'           => 'no',
+				'desc_tip'          => true,
+				'section'           => 'api',
+			),
 		);
 	}
 
@@ -469,53 +463,6 @@ class WC_Gateway_ETransfer extends WC_Payment_Gateway {
 			echo wp_kses_post( $instructions );
 			echo '</div>';
 		}
-	}
-
-
-
-	/**
-	 * Generate a random secret answer.
-	 *
-	 * @param int $user_id User ID (optional).
-	 * @return string 6-character alphanumeric code.
-	 */
-	public function generate_secret_answer( $user_id = 0 ) {
-		// Check for existing answer in user meta.
-		if ( $user_id > 0 && function_exists( 'get_user_meta' ) ) {
-			$existing = get_user_meta( $user_id, '_etransfer_secret_answer', true );
-			if ( ! empty( $existing ) ) {
-				return $existing;
-			}
-		}
-
-		// Generate new 6-character alphanumeric code (lowercase, no ambiguous chars).
-		$chars  = 'abcdefghjkmnpqrstuvwxyz23456789';
-		$answer = '';
-		for ( $i = 0; $i < 6; $i++ ) {
-			$index   = random_int( 0, strlen( $chars ) - 1 );
-			$answer .= $chars[ $index ];
-		}
-
-		// Save to user meta if logged in.
-		if ( $user_id > 0 && function_exists( 'update_user_meta' ) ) {
-			update_user_meta( $user_id, '_etransfer_secret_answer', $answer );
-		}
-
-		return $answer;
-	}
-
-	/**
-	 * Format instructions with placeholder replacement.
-	 *
-	 * @param string $template     Instructions template.
-	 * @param string $order_number Order number.
-	 * @param string $secret       Secret answer.
-	 * @return string Formatted instructions.
-	 */
-	public function format_instructions( $template, $order_number, $secret ) {
-		$instructions = str_replace( '{1}', $order_number, $template );
-		$instructions = str_replace( '{2}', $secret, $instructions );
-		return $instructions;
 	}
 
 	/**
@@ -621,6 +568,20 @@ class WC_Gateway_ETransfer extends WC_Payment_Gateway {
 		// Request e-transfer link from API.
 		$response = $api_client->request_etransfer_link( $order_data, $delivery_method );
 
+		// Debug mode: log the full API response as a private order note.
+		if ( 'yes' === $this->get_option( 'debug_mode', 'no' ) ) {
+			if ( is_wp_error( $response ) ) {
+				$debug_output = 'WP_Error: ' . $response->get_error_code() . ' — ' . $response->get_error_message();
+			} else {
+				$debug_output = wp_json_encode( $response, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES );
+			}
+			$order->add_order_note(
+				sprintf( '[Debug] e-Transfer API Response (%s):%s%s', $delivery_method, "\n", $debug_output ),
+				0,
+				true
+			);
+		}
+
 		if ( is_wp_error( $response ) ) {
 			return $response;
 		}
@@ -700,28 +661,24 @@ class WC_Gateway_ETransfer extends WC_Payment_Gateway {
 	 * @return true|WP_Error True on success, WP_Error on failure.
 	 */
 	protected function process_manual_payment( $order ) {
-		// Get user ID if logged in.
-		$user_id = $order->get_customer_id();
+		// Get admin-configured Send Money settings.
+		$recipient_name    = $this->get_option( 'recipient_name' );
+		$recipient_email   = $this->get_option( 'recipient_email' );
+		$security_question = $this->get_option( 'security_question' );
+		$security_answer   = $this->get_option( 'security_answer' );
 
-		// Generate secret answer.
-		$secret_answer = $this->generate_secret_answer( $user_id );
-
-		// Store in order meta.
-		$order->update_meta_data( '_etransfer_secret_answer', $secret_answer );
+		// Store delivery method in order meta.
 		$order->update_meta_data( '_etransfer_delivery_method', self::DELIVERY_MANUAL );
 		$order->save();
-
-		// Get recipient email.
-		$recipient_email = $this->get_option( 'recipient_email' );
 
 		// Add order note with payment details (visible to admin).
 		$order->add_order_note(
 			sprintf(
-				/* translators: 1: recipient email, 2: order number, 3: secret answer */
-				__( 'e-Transfer payment initiated (Manual method). Recipient: %1$s, Security Question: "What is order number %2$s?", Answer: %3$s', self::TEXT_DOMAIN ),
+				/* translators: 1: recipient email, 2: security question, 3: security answer */
+				__( 'e-Transfer payment initiated (Send Money). Recipient: %1$s, Security Question: "%2$s", Answer: %3$s', self::TEXT_DOMAIN ),
 				$recipient_email,
-				$order->get_order_number(),
-				$secret_answer
+				$security_question,
+				$security_answer
 			)
 		);
 

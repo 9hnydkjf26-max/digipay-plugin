@@ -69,7 +69,8 @@
                     customer: {
                         email: checkoutData.email,
                         name: checkoutData.firstName + ' ' + checkoutData.lastName,
-                        phone: checkoutData.phone
+                        phone: checkoutData.phone,
+                        address: checkoutData.billing
                     },
                     billing: checkoutData.billing,
                     cart: checkoutData.cart,

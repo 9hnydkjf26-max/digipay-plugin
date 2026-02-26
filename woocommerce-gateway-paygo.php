@@ -2,7 +2,7 @@
 /*
 Plugin Name: WooCommerce Payment Gateway
 Description: Configurable payment gateway for WooCommerce with credit card processing
-Version: 13.1.3
+Version: 13.1.5
 Author: Payment Gateway
 Author URI: https://example.com
 GitHub Plugin URI: configured-via-settings
@@ -11,7 +11,7 @@ GitHub Plugin URI: configured-via-settings
 defined( 'ABSPATH' ) or exit;
 
 // Plugin constants.
-define( 'WCPG_VERSION', '13.1.3' );
+define( 'WCPG_VERSION', '13.1.5' );
 define( 'WCPG_PLUGIN_FILE', __FILE__ );
 define( 'WCPG_GATEWAY_ID', 'paygobillingcc' );
 
@@ -208,6 +208,61 @@ function wcpg_ajax_toggle_setting() {
 }
 add_action( 'wp_ajax_wcpg_toggle_setting', 'wcpg_ajax_toggle_setting' );
 
+/**
+ * Extract default values from a gateway's form_fields.
+ *
+ * @param array $form_fields Gateway form fields array.
+ * @return array Defaults keyed by field name.
+ */
+function wcpg_extract_field_defaults( $form_fields ) {
+	$defaults = array();
+	foreach ( $form_fields as $key => $field ) {
+		if ( isset( $field['type'] ) && 'title' === $field['type'] ) {
+			continue;
+		}
+		$defaults[ $key ] = isset( $field['default'] ) ? $field['default'] : '';
+	}
+	return $defaults;
+}
+
+/**
+ * AJAX handler to reset all gateway settings to defaults.
+ */
+function wcpg_ajax_reset_defaults() {
+	if ( ! isset( $_POST['nonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['nonce'] ) ), 'wcpg_reset_defaults' ) ) {
+		wp_send_json_error( 'Invalid nonce' );
+	}
+
+	if ( ! current_user_can( 'manage_woocommerce' ) ) {
+		wp_send_json_error( 'Permission denied' );
+	}
+
+	// Find gateway instances from WooCommerce's registered gateways.
+	$gateways = WC()->payment_gateways()->payment_gateways();
+
+	// Reset Credit Card gateway.
+	if ( isset( $gateways[ DIGIPAY_GATEWAY_ID ] ) ) {
+		$defaults = wcpg_extract_field_defaults( $gateways[ DIGIPAY_GATEWAY_ID ]->form_fields );
+		update_option( 'woocommerce_' . DIGIPAY_GATEWAY_ID . '_settings', $defaults );
+	}
+
+	// Reset E-Transfer gateway (not in WC registry — instantiate directly).
+	if ( class_exists( 'WC_Gateway_ETransfer' ) ) {
+		$et_gateway = new WC_Gateway_ETransfer();
+		$defaults   = wcpg_extract_field_defaults( $et_gateway->get_form_fields() );
+		update_option( 'woocommerce_' . WC_Gateway_ETransfer::GATEWAY_ID . '_settings', $defaults );
+	}
+
+	// Reset Crypto gateway.
+	if ( isset( $gateways['wcpg_crypto'] ) ) {
+		$defaults = wcpg_extract_field_defaults( $gateways['wcpg_crypto']->get_form_fields() );
+		update_option( 'woocommerce_wcpg_crypto_settings', $defaults );
+	}
+
+	wp_send_json_success( array( 'reset' => true ) );
+}
+add_action( 'wp_ajax_wcpg_reset_defaults', 'wcpg_ajax_reset_defaults' );
+
 // Schedule daily health report on activation (moved from wcpg-diagnostics.php).
 register_activation_hook( __FILE__, 'wcpg_schedule_health_report' );
 
@@ -236,6 +291,10 @@ add_action( 'rest_api_init', function() {
                 ),
                 'transid'     => array(
                     'required'          => false,
+                    'sanitize_callback' => 'sanitize_text_field',
+                ),
+                'pb_token'    => array(
+                    'required'          => false, // Not present for pre-update orders.
                     'sanitize_callback' => 'sanitize_text_field',
                 ),
             ),
@@ -291,6 +350,39 @@ function wcpg_etransfer_webhook_handler( $request ) {
     }
     $handler = new WCPG_ETransfer_Webhook_Handler();
     return $handler->handle_webhook( $request );
+}
+
+/**
+ * Verify the per-order postback token.
+ *
+ * Compares the supplied token against the one stored in order meta.
+ * Pre-update orders (no stored token) are allowed through with a warning log
+ * for backward compatibility.
+ *
+ * @param WC_Order $order    The WooCommerce order object.
+ * @param string   $pb_token The token from the postback request.
+ * @return bool True if token is valid or order has no stored token (backward compat).
+ */
+function wcpg_verify_postback_token( $order, $pb_token ) {
+	$stored_token = $order->get_meta( '_wcpg_postback_token', true );
+
+	// Backward compatibility: pre-update orders have no stored token.
+	if ( empty( $stored_token ) ) {
+		if ( function_exists( 'wc_get_logger' ) ) {
+			wc_get_logger()->warning(
+				sprintf( 'Postback token missing for order %d — pre-update order allowed through', $order->get_id() ),
+				array( 'source' => 'wcpg-postback' )
+			);
+		}
+		return true;
+	}
+
+	// Require a token if the order has one stored.
+	if ( empty( $pb_token ) ) {
+		return false;
+	}
+
+	return hash_equals( $stored_token, $pb_token );
 }
 
 /**
@@ -373,6 +465,16 @@ function wcpg_process_postback( $order_id, $status_post, $transid, $source = 'le
         );
     }
 
+    // Order status gate — only accept postbacks for orders awaiting payment.
+    $order_status = $order->get_status();
+    if ( ! in_array( $order_status, array( 'pending', 'failed' ), true ) ) {
+        return array(
+            'success' => false,
+            'code'    => 'invalid_order_status',
+            'message' => 'Order not in a payable status',
+        );
+    }
+
     // Map postback status to WooCommerce order status.
     $status_lower = strtolower( $status_post );
     if ( in_array( $status_lower, array( 'pending', 'processing' ), true ) ) {
@@ -448,9 +550,20 @@ function wcpg_rest_postback_handler( $request ) {
     $order_id    = absint( $request->get_param( 'session' ) );
     $status_post = sanitize_text_field( $request->get_param( 'status_post' ) );
     $transid     = sanitize_text_field( $request->get_param( 'transid' ) );
+    $pb_token    = sanitize_text_field( $request->get_param( 'pb_token' ) );
 
     if ( empty( $order_id ) || $order_id < 1 ) {
         return new WP_REST_Response( array( 'status' => 'ignored', 'message' => 'No valid session' ), 200 );
+    }
+
+    // Verify postback token.
+    $order = wc_get_order( $order_id );
+    if ( $order && ! wcpg_verify_postback_token( $order, $pb_token ) ) {
+        return new WP_REST_Response( array(
+            'stat'    => 'error',
+            'version' => '1.0',
+            'message' => 'Invalid postback token',
+        ), 200 );
     }
 
     // Process postback using shared logic.
@@ -965,6 +1078,7 @@ function wcpg_gateway_init() {
 				'hideDefaultSaveButton'  => in_array( $current_tab, array( 'credit-card', 'e-transfer', 'crypto', 'admin' ), true ),
 				'ajaxUrl'                => admin_url( 'admin-ajax.php' ),
 				'toggleNonce'            => wp_create_nonce( 'wcpg_toggle_setting' ),
+				'resetNonce'             => wp_create_nonce( 'wcpg_reset_defaults' ),
 				'saveCCLabel'            => __( 'Save Credit Card Settings', 'wc-payment-gateway' ),
 				'saveETransferLabel'     => __( 'Save e-Transfer Settings', 'wc-payment-gateway' ),
 				'saveCryptoLabel'        => __( 'Save Crypto Settings', 'wc-payment-gateway' ),
@@ -973,7 +1087,7 @@ function wcpg_gateway_init() {
 				'etransferUrlDefault'    => __( 'Pay securely via Interac e-Transfer. A pop-up from Interac will appear after checkout.', 'wc-payment-gateway' ),
 			) );
 			?>
-			<h2><?php echo esc_html( $this->get_method_title() ); ?></h2>
+			<h2><?php echo esc_html( $this->get_method_title() ); ?> <span class="wcpg-version-badge">v<?php echo esc_html( WCPG_VERSION ); ?></span></h2>
 
 			<!-- Tabs Navigation -->
 			<div class="wcpg-tabs">
@@ -1069,6 +1183,18 @@ function wcpg_gateway_init() {
 				<div style="background: #fff; border: 1px solid #ccd0d4; border-left: 4px solid #646970; padding: 15px 20px; margin: 20px 0; box-shadow: 0 1px 1px rgba(0,0,0,.04);">
 					<h3 style="margin-top: 0;">Advanced Settings</h3>
 					<?php $this->render_advanced_settings(); ?>
+				</div>
+
+				<!-- Reset to Defaults Container -->
+				<div style="background: #fff; border: 1px solid #ccd0d4; border-left: 4px solid #d63638; padding: 15px 20px; margin: 20px 0; box-shadow: 0 1px 1px rgba(0,0,0,.04);">
+					<h3 style="margin-top: 0;">Reset to Defaults</h3>
+					<p style="color: #646970;">Reset all gateway settings (Credit Card, e-Transfer, and Crypto) back to their default values. This cannot be undone.</p>
+					<p>
+						<button type="button" id="wcpg-reset-defaults-btn" class="button" style="color: #d63638; border-color: #d63638;">
+							<?php esc_html_e( 'Reset All Settings to Defaults', 'wc-payment-gateway' ); ?>
+						</button>
+						<span id="wcpg-reset-status" style="margin-left: 10px;"></span>
+					</p>
 				</div>
 
 			</div>
@@ -1838,7 +1964,11 @@ function wcpg_gateway_init() {
 			$url_main = $this->paygomainurl . 'order/creditcard/cc_form_enc.php';
 			$zipcode  = preg_replace( '/\s+/', '', $billing['postcode'] );
 
-			$pburl      = '&pburl=' . get_option( 'siteurl' ) . '/wp-json/digipay/v1/postback';
+			$pb_token = bin2hex( random_bytes( 16 ) );
+			$order->update_meta_data( '_wcpg_postback_token', $pb_token );
+			$order->save();
+
+			$pburl      = '&pburl=' . get_option( 'siteurl' ) . '/wp-json/digipay/v1/postback?pb_token=' . $pb_token;
 				$return_url = ( $this->tocomplete !== '' ) ? $this->tocomplete : $this->get_return_url( $order );
 			$tocomplete = '&tcomplete=' . urlencode( $return_url );
 

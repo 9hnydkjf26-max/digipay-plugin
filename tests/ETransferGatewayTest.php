@@ -91,17 +91,13 @@ class ETransferGatewayTest extends DigipayTestCase {
 		$this->assertArrayHasKey( 'processing', $options );
 	}
 
-	public function test_generate_secret_answer_format() {
-		$answer = $this->gateway->generate_secret_answer();
+	public function test_has_manual_settings_requires_all_fields() {
+		$this->gateway->settings['recipient_name']    = 'Test Store';
+		$this->gateway->settings['recipient_email']   = 'payments@example.com';
+		$this->gateway->settings['security_question'] = 'Favorite sport?';
+		$this->gateway->settings['security_answer']   = '';
 
-		$this->assertIsString( $answer );
-		$this->assertEquals( 6, strlen( $answer ), 'Secret answer should be 6 characters' );
-		$this->assertMatchesRegularExpression( '/^[a-z0-9]+$/', $answer, 'Secret answer should be alphanumeric lowercase' );
-	}
-
-	public function test_format_instructions_replaces_placeholders() {
-		$result = $this->gateway->format_instructions( 'Order {1} with answer {2}', '12345', 'abc123' );
-		$this->assertSame( 'Order 12345 with answer abc123', $result );
+		$this->assertFalse( $this->gateway->has_manual_settings(), 'Should return false when security_answer is empty' );
 	}
 
 	public function test_gateway_extends_wc_payment_gateway() {
@@ -152,11 +148,11 @@ class ETransferGatewayTest extends DigipayTestCase {
 		}
 	}
 
-	public function test_default_instructions_contain_placeholders() {
-		$instructions = $this->gateway->get_default_instructions();
-
-		$this->assertStringContainsString( '{1}', $instructions );
-		$this->assertStringContainsString( '{2}', $instructions );
+	public function test_manual_settings_fields_exist() {
+		$manual_fields = array( 'recipient_name', 'recipient_email', 'security_question', 'security_answer' );
+		foreach ( $manual_fields as $field ) {
+			$this->assertArrayHasKey( $field, $this->fields, "Send Money field '{$field}' should exist" );
+		}
 	}
 
 	public function test_display_settings_fields_exist() {

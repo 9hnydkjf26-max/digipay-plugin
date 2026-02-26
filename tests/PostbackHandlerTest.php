@@ -294,9 +294,11 @@ class WcpgMockOrder {
 	private $id;
 	private $status = 'pending';
 	private $notes = array();
+	private $meta = array();
 
-	public function __construct( $id ) {
-		$this->id = $id;
+	public function __construct( $id, $status = 'pending' ) {
+		$this->id     = $id;
+		$this->status = $status;
 	}
 
 	public function update_status( $status, $note = '' ) {
@@ -310,5 +312,20 @@ class WcpgMockOrder {
 
 	public function get_id() {
 		return $this->id;
+	}
+
+	public function update_meta_data( $key, $value ) {
+		$this->meta[ $key ] = $value;
+	}
+
+	public function get_meta( $key, $single = false ) {
+		if ( isset( $this->meta[ $key ] ) ) {
+			return $this->meta[ $key ];
+		}
+		return '';
+	}
+
+	public function save() {
+		// No-op in tests.
 	}
 }
