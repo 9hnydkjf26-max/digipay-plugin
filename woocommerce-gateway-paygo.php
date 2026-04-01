@@ -2,7 +2,7 @@
 /*
 Plugin Name: WooCommerce Payment Gateway
 Description: Configurable payment gateway for WooCommerce with credit card processing
-Version: 13.1.5
+Version: 13.1.6
 Author: Payment Gateway
 Author URI: https://example.com
 GitHub Plugin URI: configured-via-settings
@@ -11,7 +11,7 @@ GitHub Plugin URI: configured-via-settings
 defined( 'ABSPATH' ) or exit;
 
 // Plugin constants.
-define( 'WCPG_VERSION', '13.1.5' );
+define( 'WCPG_VERSION', '13.1.6' );
 define( 'WCPG_PLUGIN_FILE', __FILE__ );
 define( 'WCPG_GATEWAY_ID', 'paygobillingcc' );
 
@@ -322,6 +322,12 @@ add_action( 'rest_api_init', function() {
         'callback'            => 'wcpg_etransfer_webhook_handler',
         'permission_callback' => '__return_true', // Public endpoint, signature-verified in handler
     ) );
+
+    register_rest_route( 'digipay/v1', '/etransfer-webhook-v2', array(
+        'methods'             => 'POST',
+        'callback'            => 'wcpg_etransfer_webhook_v2_handler',
+        'permission_callback' => '__return_true', // Public endpoint for new e-transfer provider
+    ) );
 } );
 
 /**
@@ -350,6 +356,22 @@ function wcpg_etransfer_webhook_handler( $request ) {
     }
     $handler = new WCPG_ETransfer_Webhook_Handler();
     return $handler->handle_webhook( $request );
+}
+
+/**
+ * REST API handler for the new e-transfer provider webhook (v2).
+ *
+ * Minimal endpoint that logs the payload and returns HTTP 200.
+ * Full processing logic will be added once API documentation is available.
+ *
+ * @param WP_REST_Request $request The incoming request.
+ * @return WP_REST_Response
+ */
+function wcpg_etransfer_webhook_v2_handler( $request ) {
+    if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
+        error_log( 'WCPG E-Transfer v2 webhook received: ' . wp_json_encode( $request->get_body_params() ) );
+    }
+    return new WP_REST_Response( array( 'status' => 'ok' ), 200 );
 }
 
 /**
@@ -2032,8 +2054,6 @@ function wcpg_gateway_init() {
 					'description' => __( 'Base URL for the credit card gateway.', 'wc-payment-gateway' ),
 					'default'     => 'https://secure.digipay.co/',
 					'placeholder' => 'https://secure.digipay.co/',
-					'readonly'    => true,
-					'show'        => true,
 				),
 				'limits_api_url' => array(
 					'title'       => __( 'Transaction Limits API', 'wc-payment-gateway' ),
