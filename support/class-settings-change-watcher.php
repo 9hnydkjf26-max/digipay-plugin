@@ -45,7 +45,7 @@ class WCPG_Settings_Change_Watcher {
 					self::diff_and_record( $gw, $old_value, $value );
 				},
 				10,
-				2
+				3
 			);
 		}
 	}
@@ -68,11 +68,11 @@ class WCPG_Settings_Change_Watcher {
 			return;
 		}
 
-		// Treat non-array sides as empty arrays so we can still detect additions/removals.
+		// Non-array old_value (e.g. WP initial state before the option exists) — skip.
 		if ( ! is_array( $old_value ) ) {
-			// Unusual WP state (e.g. option never set) — skip entirely per spec.
 			return;
 		}
+		// Non-array new_value — skip.
 		if ( ! is_array( $new_value ) ) {
 			return;
 		}
@@ -113,8 +113,8 @@ class WCPG_Settings_Change_Watcher {
 			}
 
 			// Compute was_empty / now_empty flags.
-			$was_empty = $has_old ? ( $old_field === '' || $old_field === null ) : true;
-			$now_empty = $has_new ? ( $new_field === '' || $new_field === null ) : true;
+			$was_empty = $has_old ? ( $old_field === '' || $old_field === null || $old_field === array() ) : true;
+			$now_empty = $has_new ? ( $new_field === '' || $new_field === null || $new_field === array() ) : true;
 
 			WCPG_Event_Log::record(
 				WCPG_Event_Log::TYPE_SETTINGS_CHANGE,

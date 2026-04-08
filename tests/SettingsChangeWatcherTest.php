@@ -136,6 +136,10 @@ class SettingsChangeWatcherTest extends DigipayTestCase {
 
 		// Hashes must differ since the values differ.
 		$this->assertNotSame( $event['data']['old_hash'], $event['data']['new_hash'] );
+
+		// Verify old_hash matches the expected SHA-1 of the json-encoded old value.
+		$expected_old_hash = substr( sha1( wp_json_encode( array( 'visa' ) ) ), 0, 8 );
+		$this->assertSame( $expected_old_hash, $event['data']['old_hash'] );
 	}
 
 	/**
@@ -169,6 +173,24 @@ class SettingsChangeWatcherTest extends DigipayTestCase {
 
 		$events = WCPG_Event_Log::recent( 50, WCPG_Event_Log::TYPE_SETTINGS_CHANGE );
 		$this->assertCount( 0, $events );
+	}
+
+	/**
+	 * was_empty / now_empty flags track non-empty-to-empty transitions.
+	 */
+	public function test_diff_tracks_now_empty_transition() {
+		WCPG_Settings_Change_Watcher::diff_and_record(
+			'digipay_etransfer',
+			array( 'webhook_secret_key' => 'abc' ),
+			array( 'webhook_secret_key' => '' )
+		);
+
+		$events = WCPG_Event_Log::recent( 50, WCPG_Event_Log::TYPE_SETTINGS_CHANGE );
+		$this->assertCount( 1, $events );
+
+		$event = $events[0];
+		$this->assertFalse( $event['data']['was_empty'] );
+		$this->assertTrue( $event['data']['now_empty'] );
 	}
 
 	/**
