@@ -540,18 +540,10 @@ class WCPG_Support_Admin_Page {
 				return 'Postback statistics have been reset.';
 
 			case 'clear_rate_limit_transients':
-				if ( function_exists( 'wp_cache_flush_group' ) ) {
-					wp_cache_flush_group( 'wcpg_rate_limit' );
-					return 'Rate limit cache group flushed.';
-				}
-				return 'Rate limit transients will expire within 60 seconds (wp_cache_flush_group not available on this WP version).';
+				return 'Rate limit transients auto-expire within 60 seconds. No action needed.';
 
 			case 'clear_webhook_dedup_cache':
-				if ( function_exists( 'wp_cache_flush_group' ) ) {
-					wp_cache_flush_group( 'transient' );
-					return 'Webhook dedup cache flushed.';
-				}
-				return 'Webhook dedup transients will expire within 5 minutes (wp_cache_flush_group not available on this WP version).';
+				return 'Webhook dedup cache entries auto-expire within 5 minutes. No action needed — rejected duplicate webhooks will be accepted again after the natural expiration.';
 
 			case 'clear_event_log':
 				if ( class_exists( 'WCPG_Event_Log' ) ) {
