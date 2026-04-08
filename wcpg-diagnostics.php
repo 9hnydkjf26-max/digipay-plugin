@@ -209,8 +209,12 @@ function wcpg_check_connectivity() {
     
     // Test with a simple request
     $start_time = microtime( true );
-    $response = wp_remote_get( 
-        add_query_arg( array( 'site_id' => $site_id ? $site_id : 'test' ), $api_url ),
+    $query_args = array( 'site_url' => get_site_url() );
+    if ( ! empty( $site_id ) ) {
+        $query_args['site_id'] = $site_id;
+    }
+    $response = wp_remote_get(
+        add_query_arg( $query_args, $api_url ),
         array(
             'timeout' => 15,
             'sslverify' => true,
@@ -358,16 +362,23 @@ function wcpg_test_api_connection() {
         'response_data' => null
     );
     
-    if ( empty( $site_id ) ) {
+    $site_url = get_site_url();
+
+    if ( empty( $site_id ) && empty( $site_url ) ) {
         $result['message'] = 'Site ID not configured';
         return $result;
     }
-    
+
     $api_url = $gateway->limits_api_url;
     $start_time = microtime( true );
-    
-    $response = wp_remote_get( 
-        add_query_arg( array( 'site_id' => $site_id ), $api_url ),
+
+    $query_args = array( 'site_url' => $site_url );
+    if ( ! empty( $site_id ) ) {
+        $query_args['site_id'] = $site_id;
+    }
+
+    $response = wp_remote_get(
+        add_query_arg( $query_args, $api_url ),
         array(
             'timeout' => 15,
             'sslverify' => true,
@@ -637,8 +648,10 @@ function wcpg_test_postback_url() {
 function wcpg_report_health() {
     $gateway = new WC_Gateway_Paygo_npaygo();
     $site_id = $gateway->get_option( 'siteid' );
-    
-    if ( empty( $site_id ) ) {
+    $site_url = get_site_url();
+
+    // Allow health reports even without site_id — the dashboard can identify the site by URL.
+    if ( empty( $site_id ) && empty( $site_url ) ) {
         return false;
     }
     
@@ -674,6 +687,7 @@ function wcpg_report_health() {
     // Build health report
     $health_data = array(
         'site_id' => $site_id,
+        'instance_token' => wcpg_get_instance_token(),
         'site_name' => get_bloginfo( 'name' ),
         'site_url' => get_site_url(),
         
@@ -722,8 +736,22 @@ function wcpg_report_health() {
             'body' => json_encode( $health_data )
         )
     );
-    
-    return ! is_wp_error( $response );
+
+    if ( is_wp_error( $response ) ) {
+        return false;
+    }
+
+    // Check if the dashboard returned an assigned site_id for this instance.
+    $response_code = wp_remote_retrieve_response_code( $response );
+    if ( $response_code === 200 ) {
+        $body = json_decode( wp_remote_retrieve_body( $response ), true );
+        if ( ! empty( $body['site_id'] ) && empty( $site_id ) ) {
+            $remote_site_id = sanitize_text_field( $body['site_id'] );
+            $gateway->update_option( 'siteid', $remote_site_id );
+        }
+    }
+
+    return true;
 }
 
 // ============================================================
@@ -869,15 +897,17 @@ function wcpg_get_inbound_test_result() {
  * This function outputs the diagnostics UI without the <details> collapsible wrapper,
  * suitable for embedding directly in the Admin tab.
  */
-function wcpg_render_diagnostics_content() {
+function wcpg_render_diagnostics_content( $base_url = null ) {
     // SECURITY: Verify user has permission.
     if ( ! current_user_can( 'manage_woocommerce' ) ) {
         echo '<p>' . esc_html__( 'You do not have permission to view diagnostics.', 'wc-payment-gateway' ) . '</p>';
         return;
     }
 
-    // Build base URL for Admin tab.
-    $base_url = admin_url( 'admin.php?page=wc-settings&tab=checkout&section=paygobillingcc&gateway_tab=admin' );
+    // Build base URL — caller can override so the renderer works from any admin page.
+    if ( empty( $base_url ) ) {
+        $base_url = admin_url( 'admin.php?page=wc-settings&tab=checkout&section=paygobillingcc&gateway_tab=admin' );
+    }
 
     // Handle test actions.
     if ( isset( $_GET['wcpg_action'] ) ) {
