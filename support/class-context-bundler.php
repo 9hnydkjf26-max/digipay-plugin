@@ -63,6 +63,7 @@ class WCPG_Context_Bundler {
 			'webhook_health'       => $this->build_webhook_health(),
 			'recent_failed_orders' => $this->build_recent_failed_orders(),
 			'logs'                 => $this->build_logs(),
+			'events'               => $this->build_events(),
 			'option_snapshots'     => $this->build_option_snapshots(),
 		);
 
@@ -310,6 +311,15 @@ class WCPG_Context_Bundler {
 		}
 
 		return $snapshot;
+	}
+
+	/**
+	 * Recent plugin events from the event log ring buffer.
+	 *
+	 * @return array
+	 */
+	protected function build_events() {
+		return class_exists( 'WCPG_Event_Log' ) ? WCPG_Event_Log::recent( 200 ) : array();
 	}
 
 	// ------------------------------------------------------------------

@@ -82,6 +82,15 @@ class WCPG_ETransfer_Webhook_Handler {
 	public function handle_webhook( $request ) {
 		$raw_body = $request->get_body();
 
+		self::bump_counter( 'total' );
+		if ( class_exists( 'WCPG_Event_Log' ) ) {
+			WCPG_Event_Log::record(
+				WCPG_Event_Log::TYPE_WEBHOOK,
+				array( 'outcome' => 'total' ),
+				'digipay_etransfer'
+			);
+		}
+
 		// Log that a webhook was received (payload details logged after processing).
 		if ( function_exists( 'wc_get_logger' ) ) {
 			wc_get_logger()->debug(
@@ -93,6 +102,14 @@ class WCPG_ETransfer_Webhook_Handler {
 		// Rate limit check.
 		$ip = $this->get_client_ip();
 		if ( ! $this->check_rate_limit( $ip ) ) {
+			self::bump_counter( 'rate_limit' );
+			if ( class_exists( 'WCPG_Event_Log' ) ) {
+				WCPG_Event_Log::record(
+					WCPG_Event_Log::TYPE_WEBHOOK,
+					array( 'outcome' => 'rate_limit' ),
+					'digipay_etransfer'
+				);
+			}
 			return new WP_REST_Response(
 				array( 'success' => false, 'message' => 'Rate limit exceeded' ),
 				429
@@ -105,6 +122,14 @@ class WCPG_ETransfer_Webhook_Handler {
 		$event_id  = $request->get_header( 'x_shardnexus_webhook_event_id' );
 
 		if ( empty( $signature ) || empty( $timestamp ) || empty( $event_id ) ) {
+			self::bump_counter( 'missing_headers' );
+			if ( class_exists( 'WCPG_Event_Log' ) ) {
+				WCPG_Event_Log::record(
+					WCPG_Event_Log::TYPE_WEBHOOK,
+					array( 'outcome' => 'missing_headers' ),
+					'digipay_etransfer'
+				);
+			}
 			if ( function_exists( 'wc_get_logger' ) ) {
 				wc_get_logger()->warning(
 					'E-Transfer Webhook: Missing required headers',
@@ -119,6 +144,14 @@ class WCPG_ETransfer_Webhook_Handler {
 
 		// Validate timestamp freshness.
 		if ( ! $this->validate_timestamp( $timestamp ) ) {
+			self::bump_counter( 'timestamp_reject' );
+			if ( class_exists( 'WCPG_Event_Log' ) ) {
+				WCPG_Event_Log::record(
+					WCPG_Event_Log::TYPE_WEBHOOK,
+					array( 'outcome' => 'timestamp_reject' ),
+					'digipay_etransfer'
+				);
+			}
 			if ( function_exists( 'wc_get_logger' ) ) {
 				wc_get_logger()->warning(
 					'E-Transfer Webhook: Stale timestamp: ' . $timestamp,
@@ -147,6 +180,14 @@ class WCPG_ETransfer_Webhook_Handler {
 		}
 
 		if ( ! $this->verify_signature( $raw_body, $timestamp, $signature, $secret ) ) {
+			self::bump_counter( 'hmac_fail' );
+			if ( class_exists( 'WCPG_Event_Log' ) ) {
+				WCPG_Event_Log::record(
+					WCPG_Event_Log::TYPE_WEBHOOK,
+					array( 'outcome' => 'hmac_fail' ),
+					'digipay_etransfer'
+				);
+			}
 			if ( function_exists( 'wc_get_logger' ) ) {
 				wc_get_logger()->warning(
 					'E-Transfer Webhook: Invalid signature',
@@ -161,6 +202,14 @@ class WCPG_ETransfer_Webhook_Handler {
 
 		// Check event ID idempotency.
 		if ( $this->is_duplicate_event( $event_id ) ) {
+			self::bump_counter( 'dedup_hit' );
+			if ( class_exists( 'WCPG_Event_Log' ) ) {
+				WCPG_Event_Log::record(
+					WCPG_Event_Log::TYPE_WEBHOOK,
+					array( 'outcome' => 'dedup_hit' ),
+					'digipay_etransfer'
+				);
+			}
 			if ( function_exists( 'wc_get_logger' ) ) {
 				wc_get_logger()->info(
 					'E-Transfer Webhook: Duplicate event ID: ' . $event_id,
@@ -177,6 +226,14 @@ class WCPG_ETransfer_Webhook_Handler {
 		// Parse JSON body.
 		$payload = json_decode( $raw_body, true );
 		if ( json_last_error() !== JSON_ERROR_NONE ) {
+			self::bump_counter( 'invalid_json' );
+			if ( class_exists( 'WCPG_Event_Log' ) ) {
+				WCPG_Event_Log::record(
+					WCPG_Event_Log::TYPE_WEBHOOK,
+					array( 'outcome' => 'invalid_json' ),
+					'digipay_etransfer'
+				);
+			}
 			if ( function_exists( 'wc_get_logger' ) ) {
 				wc_get_logger()->error(
 					'E-Transfer Webhook: Invalid JSON: ' . json_last_error_msg(),
@@ -208,6 +265,14 @@ class WCPG_ETransfer_Webhook_Handler {
 		// Find WooCommerce order by _etransfer_reference meta.
 		$order = $this->find_order_by_reference( $reference );
 		if ( ! $order ) {
+			self::bump_counter( 'order_not_found' );
+			if ( class_exists( 'WCPG_Event_Log' ) ) {
+				WCPG_Event_Log::record(
+					WCPG_Event_Log::TYPE_WEBHOOK,
+					array( 'outcome' => 'order_not_found' ),
+					'digipay_etransfer'
+				);
+			}
 			if ( function_exists( 'wc_get_logger' ) ) {
 				wc_get_logger()->warning(
 					'E-Transfer Webhook: No order found for reference: ' . $reference,
@@ -238,6 +303,15 @@ class WCPG_ETransfer_Webhook_Handler {
 			return new WP_REST_Response(
 				array( 'success' => true, 'message' => 'No status in payload' ),
 				200
+			);
+		}
+
+		self::bump_counter( 'processed' );
+		if ( class_exists( 'WCPG_Event_Log' ) ) {
+			WCPG_Event_Log::record(
+				WCPG_Event_Log::TYPE_WEBHOOK,
+				array( 'outcome' => 'processed' ),
+				'digipay_etransfer'
 			);
 		}
 
@@ -473,6 +547,31 @@ class WCPG_ETransfer_Webhook_Handler {
 	private function get_webhook_secret() {
 		$settings = get_option( 'woocommerce_' . WC_Gateway_ETransfer::GATEWAY_ID . '_settings', array() );
 		return isset( $settings['webhook_secret_key'] ) ? $settings['webhook_secret_key'] : '';
+	}
+
+	/**
+	 * Increment a webhook health counter (24h rolling, transient-backed).
+	 *
+	 * @param string $name Counter name, e.g. 'hmac_fail', 'dedup_hit'.
+	 */
+	public static function bump_counter( $name ) {
+		$key     = 'wcpg_etw_health';
+		$counts  = get_transient( $key );
+		if ( ! is_array( $counts ) ) {
+			$counts = array();
+		}
+		$counts[ $name ] = isset( $counts[ $name ] ) ? ( (int) $counts[ $name ] ) + 1 : 1;
+		set_transient( $key, $counts, DAY_IN_SECONDS );
+	}
+
+	/**
+	 * Read the current webhook health counters.
+	 *
+	 * @return array Counter name => integer count.
+	 */
+	public static function get_health_counters() {
+		$counts = get_transient( 'wcpg_etw_health' );
+		return is_array( $counts ) ? $counts : array();
 	}
 
 	/**

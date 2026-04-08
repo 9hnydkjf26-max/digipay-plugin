@@ -5,6 +5,7 @@
  * @package Digipay
  */
 
+require_once __DIR__ . '/../support/class-event-log.php';
 require_once __DIR__ . '/../support/class-context-bundler.php';
 
 /**
@@ -133,5 +134,16 @@ class ContextBundlerTest extends DigipayTestCase {
 		}
 		$this->assertNotEmpty( $bundle['bundle_meta']['bundle_id'] );
 		$this->assertNotEmpty( $bundle['bundle_meta']['content_sha256'] );
+	}
+
+	/**
+	 * Build() includes an 'events' section that is an array.
+	 */
+	public function test_bundle_contains_events_section() {
+		$bundler = new WCPG_Context_Bundler();
+		$bundle  = $bundler->build();
+
+		$this->assertArrayHasKey( 'events', $bundle );
+		$this->assertIsArray( $bundle['events'] );
 	}
 }

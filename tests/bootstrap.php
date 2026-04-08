@@ -28,6 +28,15 @@ if ( ! defined( 'ABSPATH' ) ) {
 if ( ! defined( 'WPINC' ) ) {
     define( 'WPINC', 'wp-includes' );
 }
+if ( ! defined( 'MINUTE_IN_SECONDS' ) ) {
+    define( 'MINUTE_IN_SECONDS', 60 );
+}
+if ( ! defined( 'HOUR_IN_SECONDS' ) ) {
+    define( 'HOUR_IN_SECONDS', 60 * MINUTE_IN_SECONDS );
+}
+if ( ! defined( 'DAY_IN_SECONDS' ) ) {
+    define( 'DAY_IN_SECONDS', 24 * HOUR_IN_SECONDS );
+}
 
 // Digipay plugin constants.
 if ( ! defined( 'DIGIPAY_GATEWAY_ID' ) ) {
@@ -289,12 +298,17 @@ if ( ! function_exists( 'update_option' ) ) {
     /**
      * Mock update_option function.
      *
+     * Persists values in the global $wcpg_mock_options store so that
+     * subsequent get_option() calls return the updated value.
+     *
      * @param string $option   Option name.
      * @param mixed  $value    Option value.
      * @param bool   $autoload Whether to autoload.
      * @return bool Always true.
      */
     function update_option( $option, $value, $autoload = true ) {
+        global $wcpg_mock_options;
+        $wcpg_mock_options[ $option ] = $value;
         return true;
     }
 }
@@ -829,7 +843,17 @@ if ( ! function_exists( 'wp_remote_retrieve_body' ) ) {
 
 // Mock delete_option function.
 if ( ! function_exists( 'delete_option' ) ) {
+	/**
+	 * Mock delete_option function.
+	 *
+	 * Removes the key from the global $wcpg_mock_options store.
+	 *
+	 * @param string $option Option name.
+	 * @return bool Always true.
+	 */
 	function delete_option( $option ) {
+		global $wcpg_mock_options;
+		unset( $wcpg_mock_options[ $option ] );
 		return true;
 	}
 }
