@@ -250,34 +250,40 @@ class WCPG_Support_Admin_Page {
 		}
 		check_admin_referer( self::NONCE_DIAGNOSE_ACTION, self::NONCE_DIAGNOSE_NAME );
 
-		// Run all individual diagnostic functions if available.
-		if ( function_exists( 'wcpg_run_diagnostics' ) ) {
-			wcpg_run_diagnostics();
-		}
-		if ( function_exists( 'wcpg_test_api_connection' ) ) {
-			wcpg_test_api_connection();
-		}
-		if ( function_exists( 'wcpg_test_inbound_connectivity' ) ) {
-			wcpg_test_inbound_connectivity();
-		}
-		if ( function_exists( 'wcpg_report_health' ) ) {
-			wcpg_report_health();
-		}
+		// Run all individual diagnostic functions if available, each in its own try/catch.
+		$run = function ( $fn ) {
+			if ( function_exists( $fn ) ) {
+				try {
+					$fn();
+				} catch ( \Throwable $e ) {
+					error_log( 'WCPG handle_diagnose: ' . $fn . ' threw: ' . $e->getMessage() );
+				}
+			}
+		};
+		$run( 'wcpg_run_diagnostics' );
+		$run( 'wcpg_test_api_connection' );
+		$run( 'wcpg_test_inbound_connectivity' );
+		$run( 'wcpg_report_health' );
 
-		// Build the context bundle.
-		$bundle = array();
-		if ( class_exists( 'WCPG_Context_Bundler' ) ) {
-			$bundler = new WCPG_Context_Bundler();
-			$bundle  = $bundler->build();
-		}
+		// Build the context bundle and detect issues. Any failure here falls back gracefully.
+		$bundle      = array();
+		$matched     = array();
+		$bundle_meta = array();
+		try {
+			if ( class_exists( 'WCPG_Context_Bundler' ) ) {
+				$bundler = new WCPG_Context_Bundler();
+				$bundle  = $bundler->build();
+			}
 
-		// Detect issues.
-		$matched = array();
-		if ( class_exists( 'WCPG_Issue_Catalog' ) ) {
-			$matched = WCPG_Issue_Catalog::detect_all( $bundle );
-		}
+			if ( class_exists( 'WCPG_Issue_Catalog' ) ) {
+				$matched = WCPG_Issue_Catalog::detect_all( $bundle );
+			}
 
-		$bundle_meta = isset( $bundle['bundle_meta'] ) ? $bundle['bundle_meta'] : array( 'schema_version' => '1.0.0' );
+			$bundle_meta = isset( $bundle['bundle_meta'] ) ? $bundle['bundle_meta'] : array();
+		} catch ( \Throwable $e ) {
+			error_log( 'WCPG handle_diagnose: bundler/issue-detection threw: ' . $e->getMessage() );
+			$bundle_meta = array( 'error' => $e->getMessage() );
+		}
 
 		set_transient(
 			'wcpg_last_diagnose_results',
