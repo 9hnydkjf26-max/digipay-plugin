@@ -21,6 +21,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 class WCPG_Context_Bundler {
 
 	/**
+	 * Cached result of build_recent_failed_orders() to avoid duplicate DB queries.
+	 *
+	 * @var array|null
+	 */
+	private $failed_orders_cache = null;
+
+	/**
 	 * Gateway IDs we collect settings from.
 	 *
 	 * @var string[]
@@ -229,6 +236,10 @@ class WCPG_Context_Bundler {
 	 * @return array
 	 */
 	protected function build_recent_failed_orders() {
+		if ( null !== $this->failed_orders_cache ) {
+			return $this->failed_orders_cache;
+		}
+
 		if ( ! function_exists( 'wc_get_orders' ) ) {
 			return array();
 		}
@@ -266,6 +277,8 @@ class WCPG_Context_Bundler {
 				'etransfer_status'        => method_exists( $order, 'get_meta' ) ? $order->get_meta( '_etransfer_transaction_status' ) : null,
 			);
 		}
+
+		$this->failed_orders_cache = $out;
 		return $out;
 	}
 

@@ -14,6 +14,19 @@ require_once __DIR__ . '/../support/class-context-bundler.php';
 class ContextBundlerTest extends DigipayTestCase {
 
 	/**
+	 * Reset shared globals and event log between tests to prevent cross-test contamination.
+	 */
+	protected function tear_down() {
+		global $wcpg_mock_orders, $wcpg_mock_options;
+		$wcpg_mock_orders  = array();
+		$wcpg_mock_options = array();
+		if ( class_exists( 'WCPG_Event_Log' ) ) {
+			WCPG_Event_Log::clear();
+		}
+		parent::tear_down();
+	}
+
+	/**
 	 * Redaction hides secret-shaped keys and preserves value length.
 	 */
 	public function test_redact_settings_redacts_secret_keys() {
