@@ -64,6 +64,7 @@ class WCPG_Context_Bundler {
 			'recent_failed_orders' => $this->build_recent_failed_orders(),
 			'logs'                 => $this->build_logs(),
 			'events'               => $this->build_events(),
+			'settings_changes'     => $this->build_settings_changes(),
 			'option_snapshots'     => $this->build_option_snapshots(),
 		);
 
@@ -320,6 +321,17 @@ class WCPG_Context_Bundler {
 	 */
 	protected function build_events() {
 		return class_exists( 'WCPG_Event_Log' ) ? WCPG_Event_Log::recent( 200 ) : array();
+	}
+
+	/**
+	 * Recent settings-change events (last 50) from the event log.
+	 *
+	 * @return array
+	 */
+	protected function build_settings_changes() {
+		return class_exists( 'WCPG_Event_Log' )
+			? WCPG_Event_Log::recent( 50, WCPG_Event_Log::TYPE_SETTINGS_CHANGE )
+			: array();
 	}
 
 	// ------------------------------------------------------------------

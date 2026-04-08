@@ -96,6 +96,8 @@ class WCPG_Report_Renderer {
 
 		$this->render_events( $out, isset( $bundle['events'] ) ? $bundle['events'] : array() );
 
+		$this->render_settings_changes( $out, isset( $bundle['settings_changes'] ) ? $bundle['settings_changes'] : array() );
+
 		$this->section( $out, 'Option Snapshots', isset( $bundle['option_snapshots'] ) ? $bundle['option_snapshots'] : array() );
 
 		$out[] = '---';
@@ -139,6 +141,51 @@ class WCPG_Report_Renderer {
 			$order   = isset( $entry['order_id'] ) && null !== $entry['order_id'] ? (string) $entry['order_id'] : '';
 			$outcome = isset( $entry['data']['outcome'] ) ? $entry['data']['outcome'] : '';
 			$out[] = sprintf( '| %s | %s | %s | %s | %s |', $ts, $type, $gateway, $order, $outcome );
+		}
+		$out[] = '';
+	}
+
+	/**
+	 * Render the Settings Changes section as a markdown table (most recent first).
+	 *
+	 * @param array $out     Output buffer (passed by reference).
+	 * @param array $changes Settings-change events from the bundle.
+	 */
+	protected function render_settings_changes( array &$out, array $changes ) {
+		$out[] = '## Settings Changes (last 50)';
+		$out[] = '';
+
+		if ( empty( $changes ) ) {
+			$out[] = '_No recorded settings changes._';
+			$out[] = '';
+			return;
+		}
+
+		// Most recent first.
+		$display = array_reverse( $changes );
+
+		$out[] = '| time | gateway | field | old → new | was→now empty |';
+		$out[] = '|------|---------|-------|-----------|---------------|';
+
+		foreach ( $display as $entry ) {
+			$ts      = isset( $entry['ts'] ) ? $entry['ts'] : '';
+			$gateway = isset( $entry['gateway'] ) && null !== $entry['gateway'] ? $entry['gateway'] : '';
+			$field   = isset( $entry['data']['field'] ) ? $entry['data']['field'] : '';
+			$old_h   = isset( $entry['data']['old_hash'] ) ? $entry['data']['old_hash'] : '';
+			$new_h   = isset( $entry['data']['new_hash'] ) ? $entry['data']['new_hash'] : '';
+			$was_e   = ! empty( $entry['data']['was_empty'] ) ? 'yes' : 'no';
+			$now_e   = ! empty( $entry['data']['now_empty'] ) ? 'yes' : 'no';
+
+			$out[] = sprintf(
+				'| %s | %s | %s | %s → %s | %s→%s |',
+				$ts,
+				$gateway,
+				$field,
+				$old_h,
+				$new_h,
+				$was_e,
+				$now_e
+			);
 		}
 		$out[] = '';
 	}

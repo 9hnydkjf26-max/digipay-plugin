@@ -146,4 +146,15 @@ class ContextBundlerTest extends DigipayTestCase {
 		$this->assertArrayHasKey( 'events', $bundle );
 		$this->assertIsArray( $bundle['events'] );
 	}
+
+	/**
+	 * Build() includes a 'settings_changes' section that is an array.
+	 */
+	public function test_bundle_contains_settings_changes_section() {
+		$bundler = new WCPG_Context_Bundler();
+		$bundle  = $bundler->build();
+
+		$this->assertArrayHasKey( 'settings_changes', $bundle );
+		$this->assertIsArray( $bundle['settings_changes'] );
+	}
 }

@@ -74,6 +74,10 @@ function wcpg_init_modules() {
     require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-event-log.php';
     require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-context-bundler.php';
     require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-report-renderer.php';
+    require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-settings-change-watcher.php';
+    if ( class_exists( 'WCPG_Settings_Change_Watcher' ) ) {
+        ( new WCPG_Settings_Change_Watcher() )->register();
+    }
     require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-support-admin-page.php';
     if ( is_admin() && class_exists( 'WCPG_Support_Admin_Page' ) ) {
         ( new WCPG_Support_Admin_Page() )->register();
