@@ -28,6 +28,83 @@ define( 'WCPG_FINGERPRINT_REGION', 'us' ); // us, eu, or ap
 // GitHub personal access token for auto-updates (contents:read scope)
 define( 'WCPG_GITHUB_TOKEN', 'YOUR_TOKEN_HERE' );
 
+/**
+ * Build a canonical query string for HMAC signing.
+ *
+ * Keys are sorted alphabetically; keys and values are RFC3986-encoded
+ * (PHP rawurlencode); pairs are joined with '&'. The receiving edge
+ * function rebuilds the same string from the parsed URL and verifies
+ * the signature against it.
+ *
+ * Must produce output byte-identical to the edge function's
+ * canonicalQueryString() / rfc3986Encode() helpers.
+ *
+ * @param array $args Query args as key => value.
+ * @return string Canonical query string (without leading '?').
+ */
+function wcpg_canonical_query( array $args ) {
+	ksort( $args );
+	$parts = array();
+	foreach ( $args as $k => $v ) {
+		$parts[] = rawurlencode( (string) $k ) . '=' . rawurlencode( (string) $v );
+	}
+	return implode( '&', $parts );
+}
+
+/**
+ * Return the three HMAC signing headers for an outbound request to a
+ * Digipay Supabase edge function (plugin-bundle-ingest, plugin-site-limits,
+ * plugin-site-health-report).
+ *
+ * Canonical string to sign:
+ *   - POST: the raw JSON request body
+ *   - GET:  the canonical query string from wcpg_canonical_query()
+ *
+ * Signature:  hash_hmac('sha512', $ts . '.' . $canonical, INGEST_HANDSHAKE_KEY)
+ *
+ * The edge functions accept unsigned requests during the rollout window
+ * (controlled by DIGIPAY_REQUIRE_SIGNATURE on the server side), so a plugin
+ * that upgrades before the server enforces signatures will continue to work,
+ * and the reverse is also true. Once all installs sign, the server flag flips.
+ *
+ * @param string $canonical Body (POST) or canonical query string (GET).
+ * @return array Associative array of 3 headers, ready to pass to wp_remote_*.
+ */
+function wcpg_sign_api_headers( $canonical ) {
+	// Lazy-load WCPG_Auto_Uploader for the INGEST_HANDSHAKE_KEY constant and
+	// the install UUID helper. This keeps wcpg-diagnostics.php (which calls
+	// us from wcpg_report_health) from having to require the class itself.
+	if ( ! class_exists( 'WCPG_Auto_Uploader' ) ) {
+		$auto_uploader_file = plugin_dir_path( __FILE__ ) . 'support/class-auto-uploader.php';
+		if ( file_exists( $auto_uploader_file ) ) {
+			require_once $auto_uploader_file;
+		}
+	}
+
+	if ( ! class_exists( 'WCPG_Auto_Uploader' ) ) {
+		// Class unavailable — return empty headers so the request goes out
+		// unsigned rather than failing entirely. Edge function will accept
+		// during rollout; after enforcement, it will reject and the caller
+		// will see a 401 (same behavior as any other auth failure).
+		return array();
+	}
+
+	$install_uuid = WCPG_Auto_Uploader::get_or_create_install_uuid();
+	if ( empty( $install_uuid ) ) {
+		return array();
+	}
+
+	$ts        = (string) time();
+	$secret    = WCPG_Auto_Uploader::INGEST_HANDSHAKE_KEY;
+	$signature = hash_hmac( 'sha512', $ts . '.' . $canonical, $secret );
+
+	return array(
+		'X-Digipay-Install-Uuid' => $install_uuid,
+		'X-Digipay-Timestamp'    => $ts,
+		'X-Digipay-Signature'    => $signature,
+	);
+}
+
 // Load diagnostics & health reporting module
 require_once( plugin_dir_path( __FILE__ ) . 'wcpg-diagnostics.php' );
 
@@ -1015,7 +1092,6 @@ function wcpg_gateway_init() {
 		public $paygomainurl;
 		public $limits_api_url;
 		public $health_report_url;
-		public $inbound_test_url;
 		public $github_username;
 		public $github_repo;
 		public $daily_limit;
@@ -1062,7 +1138,6 @@ function wcpg_gateway_init() {
 			$this->paygomainurl   = $this->get_option( 'payment_gateway_url', 'https://secure.digipay.co/' );
 			$this->limits_api_url = $this->get_option( 'limits_api_url', 'https://hzdybwclwqkcobpwxzoo.supabase.co/functions/v1/plugin-site-limits' );
 			$this->health_report_url = $this->get_option( 'health_report_url', 'https://hzdybwclwqkcobpwxzoo.supabase.co/functions/v1/plugin-site-health-report' );
-			$this->inbound_test_url = $this->get_option( 'inbound_test_url', 'https://hzdybwclwqkcobpwxzoo.supabase.co/functions/v1/test-inbound-connectivity' );
 			$this->github_username = $this->get_option( 'github_username', '9hnydkjf26-max' );
 			$this->github_repo = $this->get_option( 'github_repo', 'digipay-plugin' );
 			
@@ -2136,13 +2211,26 @@ function wcpg_gateway_init() {
 				$query_args['site_id'] = $site_id;
 			}
 
+			// Build the canonical query string (sorted, RFC3986-encoded) and
+			// append it to the URL verbatim. Using the canonical form on the
+			// wire guarantees the edge function can recompute the same
+			// signature payload — it rebuilds it from url.searchParams.
+			$canonical_query = wcpg_canonical_query( $query_args );
+			$signed_url      = $this->limits_api_url . '?' . $canonical_query;
+
+			$signing_headers = wcpg_sign_api_headers( $canonical_query );
+			$headers         = array_merge(
+				array( 'Accept' => 'application/json' ),
+				$signing_headers
+			);
+
 			$response = wcpg_http_request(
-				add_query_arg( $query_args, $this->limits_api_url ),
+				$signed_url,
 				array(
 					'method'    => 'GET',
 					'timeout'   => 15,
 					'sslverify' => true,
-					'headers'   => array( 'Accept' => 'application/json' ),
+					'headers'   => $headers,
 				)
 			);
 
@@ -2365,13 +2453,6 @@ function wcpg_gateway_init() {
 					'type'        => 'text',
 					'description' => __( 'API endpoint for sending health reports.', 'wc-payment-gateway' ),
 					'default'     => 'https://hzdybwclwqkcobpwxzoo.supabase.co/functions/v1/plugin-site-health-report',
-					'readonly'    => true,
-				),
-				'inbound_test_url' => array(
-					'title'       => __( 'Inbound Test API', 'wc-payment-gateway' ),
-					'type'        => 'text',
-					'description' => __( 'API endpoint for testing inbound connectivity.', 'wc-payment-gateway' ),
-					'default'     => 'https://hzdybwclwqkcobpwxzoo.supabase.co/functions/v1/test-inbound-connectivity',
 					'readonly'    => true,
 				),
 				'github_username' => array(
