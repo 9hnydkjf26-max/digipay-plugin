@@ -82,6 +82,10 @@ function wcpg_init_modules() {
     require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-support-admin-page.php';
     require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-gateway-issue-notices.php';
     require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-auto-uploader.php';
+    require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-log-tail-endpoint.php';
+    if ( class_exists( 'WCPG_Log_Tail_Endpoint' ) ) {
+        ( new WCPG_Log_Tail_Endpoint() )->register();
+    }
     if ( class_exists( 'WCPG_Gateway_Issue_Notices' ) ) {
         ( new WCPG_Gateway_Issue_Notices() )->register();
     }

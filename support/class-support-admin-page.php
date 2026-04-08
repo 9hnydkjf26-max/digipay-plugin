@@ -80,6 +80,23 @@ class WCPG_Support_Admin_Page {
 				defined( 'WCPG_VERSION' ) ? WCPG_VERSION : '1.0.0'
 			);
 		}
+		if ( function_exists( 'wp_enqueue_script' ) ) {
+			wp_enqueue_script(
+				'wcpg-support-log-tail',
+				plugin_dir_url( WCPG_PLUGIN_FILE ) . 'assets/js/support-log-tail.js',
+				array(),
+				defined( 'WCPG_VERSION' ) ? WCPG_VERSION : '1.0.0',
+				true
+			);
+			wp_localize_script(
+				'wcpg-support-log-tail',
+				'wcpgLogTail',
+				array(
+					'restUrl'   => function_exists( 'rest_url' ) ? rest_url( 'digipay/v1/support/log-tail' ) : '/wp-json/digipay/v1/support/log-tail',
+					'restNonce' => function_exists( 'wp_create_nonce' ) ? wp_create_nonce( 'wp_rest' ) : '',
+				)
+			);
+		}
 	}
 
 	/**
@@ -169,6 +186,14 @@ class WCPG_Support_Admin_Page {
 						</label>
 						<?php submit_button( 'Save', 'secondary', 'submit', false ); ?>
 					</form>
+				</div>
+			</details>
+
+			<h2>Live Log Tail</h2>
+			<details id="wcpg-log-tail-details">
+				<summary><strong>Show live log tail (auto-refreshes every 5 seconds)</strong></summary>
+				<div id="wcpg-log-tail-output" style="background:#1e1e1e; color:#d4d4d4; padding:12px; font-family:monospace; font-size:11px; max-height:400px; overflow:auto; margin-top:10px; border-radius:4px;">
+					<p style="color:#888;">Opening panel to start polling...</p>
 				</div>
 			</details>
 

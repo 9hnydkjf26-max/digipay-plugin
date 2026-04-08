@@ -186,6 +186,10 @@ if ( ! function_exists( 'current_user_can' ) ) {
      * @return bool Always true in test mode.
      */
     function current_user_can( $capability ) {
+        // Allow tests to override via $GLOBALS['wcpg_mock_user_can'].
+        if ( isset( $GLOBALS['wcpg_mock_user_can'] ) ) {
+            return (bool) $GLOBALS['wcpg_mock_user_can'];
+        }
         // In tests, default to true unless specifically mocked otherwise.
         return true;
     }
