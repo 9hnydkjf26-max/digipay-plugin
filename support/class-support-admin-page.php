@@ -23,6 +23,9 @@ class WCPG_Support_Admin_Page {
 	const NONCE_ACTION = 'wcpg_support_generate';
 	const CAPABILITY = 'manage_woocommerce';
 
+	const NONCE_DIAGNOSE_ACTION = 'wcpg_support_diagnose';
+	const NONCE_DIAGNOSE_NAME   = 'wcpg_diagnose_nonce';
+
 	/**
 	 * WordPress page hook suffix returned by add_submenu_page().
 	 *
@@ -36,6 +39,7 @@ class WCPG_Support_Admin_Page {
 	public function register() {
 		add_action( 'admin_menu', array( $this, 'add_menu' ) );
 		add_action( 'admin_post_wcpg_support_generate', array( $this, 'handle_generate' ) );
+		add_action( 'admin_post_wcpg_support_diagnose', array( $this, 'handle_diagnose' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 	}
 
@@ -93,6 +97,16 @@ class WCPG_Support_Admin_Page {
 				support ticket).
 			</p>
 
+			<h2>Diagnose My Site</h2>
+			<p>Run all diagnostic checks at once and get a plain-English summary of any problems.</p>
+			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+				<input type="hidden" name="action" value="wcpg_support_diagnose" />
+				<?php wp_nonce_field( self::NONCE_DIAGNOSE_ACTION, self::NONCE_DIAGNOSE_NAME ); ?>
+				<?php submit_button( 'Diagnose My Site', 'primary', 'submit', false ); ?>
+			</form>
+
+			<?php $this->render_diagnose_results(); ?>
+
 			<h2>Current Status</h2>
 			<table class="widefat striped" style="max-width:720px;">
 				<tbody>
@@ -108,15 +122,18 @@ class WCPG_Support_Admin_Page {
 				Use these tools to verify your site is properly configured and reachable. Results are stored
 				locally and included in the diagnostic report you can download below.
 			</p>
-			<div style="background:#fff; border:1px solid #ccd0d4; border-left:4px solid #2271b1; padding:15px 20px; margin:12px 0 24px; box-shadow:0 1px 1px rgba(0,0,0,.04);">
-				<?php
-				if ( function_exists( 'wcpg_render_diagnostics_content' ) ) {
-					wcpg_render_diagnostics_content( admin_url( 'admin.php?page=' . self::MENU_SLUG ) );
-				} else {
-					echo '<p>Diagnostic tools are unavailable. Please reinstall the plugin.</p>';
-				}
-				?>
-			</div>
+			<details>
+				<summary><strong>Advanced: Run individual tests</strong></summary>
+				<div style="background:#fff; border:1px solid #ccd0d4; border-left:4px solid #2271b1; padding:15px 20px; margin:12px 0 24px; box-shadow:0 1px 1px rgba(0,0,0,.04);">
+					<?php
+					if ( function_exists( 'wcpg_render_diagnostics_content' ) ) {
+						wcpg_render_diagnostics_content( admin_url( 'admin.php?page=' . self::MENU_SLUG ) );
+					} else {
+						echo '<p>Diagnostic tools are unavailable. Please reinstall the plugin.</p>';
+					}
+					?>
+				</div>
+			</details>
 
 			<h2>Generate Diagnostic Report</h2>
 			<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
@@ -126,6 +143,65 @@ class WCPG_Support_Admin_Page {
 			</form>
 		</div>
 		<?php
+	}
+
+	/**
+	 * Render diagnostic results panel if available.
+	 *
+	 * Reads the results transient (set by handle_diagnose()), renders a
+	 * plain-English summary, then deletes the transient so refreshing does not
+	 * re-show stale data.
+	 */
+	protected function render_diagnose_results() {
+		// Only show results when redirected back after running the diagnose action.
+		if ( ! isset( $_GET['diagnose'] ) || 'done' !== $_GET['diagnose'] ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			return;
+		}
+
+		$data = get_transient( 'wcpg_last_diagnose_results' );
+		if ( ! is_array( $data ) ) {
+			return;
+		}
+
+		// Delete immediately so a page refresh does not re-show stale results.
+		delete_transient( 'wcpg_last_diagnose_results' );
+
+		$issues    = isset( $data['issues'] ) && is_array( $data['issues'] ) ? $data['issues'] : array();
+		$timestamp = isset( $data['timestamp'] ) ? $data['timestamp'] : '';
+
+		echo '<div class="wcpg-diagnose-results" style="margin:16px 0;">';
+		echo '<h3>' . esc_html__( 'Diagnostic Results', 'wc-payment-gateway' ) . '</h3>';
+		if ( $timestamp ) {
+			echo '<p class="description">' . esc_html( sprintf( __( 'Run at: %s', 'wc-payment-gateway' ), $timestamp ) ) . '</p>';
+		}
+
+		if ( empty( $issues ) ) {
+			echo '<div class="notice notice-success inline"><p><strong>' . esc_html__( 'Your site is healthy ✓', 'wc-payment-gateway' ) . '</strong> ' . esc_html__( 'No issues detected.', 'wc-payment-gateway' ) . '</p></div>';
+		} else {
+			$count = count( $issues );
+			echo '<div class="notice notice-warning inline"><p><strong>' . esc_html( sprintf( _n( '%d issue found:', '%d issues found:', $count, 'wc-payment-gateway' ), $count ) ) . '</strong></p></div>';
+
+			foreach ( $issues as $issue ) {
+				$id       = isset( $issue['id'] ) ? $issue['id'] : '';
+				$title    = isset( $issue['title'] ) ? $issue['title'] : '';
+				$plain    = isset( $issue['plain_english'] ) ? $issue['plain_english'] : '';
+				$fix      = isset( $issue['fix'] ) ? $issue['fix'] : '';
+				$severity = isset( $issue['severity'] ) ? $issue['severity'] : 'info';
+
+				echo '<div class="wcpg-issue-card wcpg-issue-severity-' . esc_attr( $severity ) . '">';
+				echo '<span class="wcpg-issue-badge wcpg-issue-severity-' . esc_attr( $severity ) . '">' . esc_html( $id ) . '</span> ';
+				echo '<strong>' . esc_html( $title ) . '</strong>';
+				if ( $plain ) {
+					echo '<p>' . esc_html( $plain ) . '</p>';
+				}
+				if ( $fix ) {
+					echo '<p><em>' . esc_html__( 'Fix:', 'wc-payment-gateway' ) . '</em> ' . esc_html( $fix ) . '</p>';
+				}
+				echo '</div>';
+			}
+		}
+
+		echo '</div>';
 	}
 
 	/**
@@ -162,6 +238,58 @@ class WCPG_Support_Admin_Page {
 		header( 'Content-Length: ' . filesize( $zip_path ) );
 		readfile( $zip_path );
 		@unlink( $zip_path );
+		exit;
+	}
+
+	/**
+	 * Handle the "Diagnose My Site" POST: run all diagnostics, detect issues, stash results.
+	 */
+	public function handle_diagnose() {
+		if ( ! current_user_can( self::CAPABILITY ) ) {
+			wp_die( esc_html__( 'You do not have permission to perform this action.', 'wc-payment-gateway' ), '', array( 'response' => 403 ) );
+		}
+		check_admin_referer( self::NONCE_DIAGNOSE_ACTION, self::NONCE_DIAGNOSE_NAME );
+
+		// Run all individual diagnostic functions if available.
+		if ( function_exists( 'wcpg_run_diagnostics' ) ) {
+			wcpg_run_diagnostics();
+		}
+		if ( function_exists( 'wcpg_test_api_connection' ) ) {
+			wcpg_test_api_connection();
+		}
+		if ( function_exists( 'wcpg_test_inbound_connectivity' ) ) {
+			wcpg_test_inbound_connectivity();
+		}
+		if ( function_exists( 'wcpg_report_health' ) ) {
+			wcpg_report_health();
+		}
+
+		// Build the context bundle.
+		$bundle = array();
+		if ( class_exists( 'WCPG_Context_Bundler' ) ) {
+			$bundler = new WCPG_Context_Bundler();
+			$bundle  = $bundler->build();
+		}
+
+		// Detect issues.
+		$matched = array();
+		if ( class_exists( 'WCPG_Issue_Catalog' ) ) {
+			$matched = WCPG_Issue_Catalog::detect_all( $bundle );
+		}
+
+		$bundle_meta = isset( $bundle['bundle_meta'] ) ? $bundle['bundle_meta'] : array( 'schema_version' => '1.0.0' );
+
+		set_transient(
+			'wcpg_last_diagnose_results',
+			array(
+				'timestamp'   => gmdate( 'c' ),
+				'issues'      => $matched,
+				'bundle_meta' => $bundle_meta,
+			),
+			5 * MINUTE_IN_SECONDS
+		);
+
+		wp_safe_redirect( admin_url( 'admin.php?page=' . self::MENU_SLUG . '&diagnose=done' ) );
 		exit;
 	}
 

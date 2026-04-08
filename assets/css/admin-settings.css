@@ -257,3 +257,70 @@
 .wcpg-collapse-icon.wcpg-collapsed {
 	transform: rotate(-90deg);
 }
+
+/* Diagnose My Site — Issue Cards */
+.wcpg-issue-card {
+	border: 1px solid #c3c4c7;
+	border-left-width: 4px;
+	border-radius: 3px;
+	padding: 12px 16px;
+	margin: 10px 0;
+	background: #fff;
+}
+
+.wcpg-issue-badge {
+	display: inline-block;
+	font-family: monospace;
+	font-size: 11px;
+	font-weight: 600;
+	padding: 2px 7px;
+	border-radius: 3px;
+	margin-right: 6px;
+	vertical-align: middle;
+}
+
+/* Severity: info */
+.wcpg-issue-severity-info.wcpg-issue-card {
+	background: #e7f3ff;
+	border-left-color: #2271b1;
+}
+
+.wcpg-issue-severity-info.wcpg-issue-badge {
+	background: #2271b1;
+	color: #fff;
+}
+
+/* Severity: warning */
+.wcpg-issue-severity-warning.wcpg-issue-card {
+	background: #fcf9e8;
+	border-left-color: #996800;
+}
+
+.wcpg-issue-severity-warning.wcpg-issue-badge {
+	background: #996800;
+	color: #fff;
+}
+
+/* Severity: error */
+.wcpg-issue-severity-error.wcpg-issue-card {
+	background: #fef1f1;
+	border-left-color: #b32d2e;
+}
+
+.wcpg-issue-severity-error.wcpg-issue-badge {
+	background: #b32d2e;
+	color: #fff;
+}
+
+/* Severity: critical */
+.wcpg-issue-severity-critical.wcpg-issue-card {
+	background: #fff0f0;
+	border-left-color: #8a1f11;
+	border-left-width: 5px;
+	font-weight: 600;
+}
+
+.wcpg-issue-severity-critical.wcpg-issue-badge {
+	background: #8a1f11;
+	color: #fff;
+}

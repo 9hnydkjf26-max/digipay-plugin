@@ -195,12 +195,16 @@ if ( ! function_exists( 'wp_safe_redirect' ) ) {
     /**
      * Mock wp_safe_redirect function.
      *
+     * Records the redirect target in $GLOBALS['wcpg_mock_redirect'] and throws an
+     * Exception so that any immediately-following exit/die in the caller does not
+     * kill the test process.  Tests can catch the exception and inspect the global.
+     *
      * @param string $location Location to redirect.
      * @param int    $status   HTTP status code.
      */
     function wp_safe_redirect( $location, $status = 302 ) {
-        // No-op in tests.
-        return true;
+        $GLOBALS['wcpg_mock_redirect'] = $location;
+        throw new Exception( 'wp_safe_redirect: ' . $location );
     }
 }
 
@@ -1253,6 +1257,75 @@ if ( ! function_exists( 'add_query_arg' ) ) {
 			return $url . ( $parts ? $separator . implode( '&', $parts ) : '' );
 		}
 		return $url;
+	}
+}
+
+// Mock _n (singular/plural translation) function.
+if ( ! function_exists( '_n' ) ) {
+	function _n( $single, $plural, $number, $domain = 'default' ) {
+		return ( 1 === (int) $number ) ? $single : $plural;
+	}
+}
+
+// Mock admin_url function.
+if ( ! function_exists( 'admin_url' ) ) {
+	function admin_url( $path = '', $scheme = 'admin' ) {
+		return 'https://example.com/wp-admin/' . ltrim( $path, '/' );
+	}
+}
+
+// Mock home_url function.
+if ( ! function_exists( 'home_url' ) ) {
+	function home_url( $path = '', $scheme = null ) {
+		return 'https://example.com' . ( $path ? '/' . ltrim( $path, '/' ) : '' );
+	}
+}
+
+// Mock submit_button function.
+if ( ! function_exists( 'submit_button' ) ) {
+	function submit_button( $text = 'Save Changes', $type = 'primary', $name = 'submit', $wrap = true, $other_attributes = '' ) {
+		$html = '<input type="submit" name="' . esc_attr( $name ) . '" class="button button-' . esc_attr( $type ) . '" value="' . esc_attr( $text ) . '" />';
+		if ( $wrap ) {
+			echo '<p class="submit">' . $html . '</p>';
+		} else {
+			echo $html;
+		}
+	}
+}
+
+// Mock wp_nonce_field function.
+if ( ! function_exists( 'wp_nonce_field' ) ) {
+	function wp_nonce_field( $action = -1, $name = '_wpnonce', $referer = true, $echo = true ) {
+		$field = '<input type="hidden" name="' . esc_attr( $name ) . '" value="testnonce" />';
+		if ( $echo ) {
+			echo $field;
+		}
+		return $field;
+	}
+}
+
+// Mock check_admin_referer function.
+// Returns true by default; set $GLOBALS['wcpg_mock_nonce_ok'] = false to simulate failure.
+if ( ! function_exists( 'check_admin_referer' ) ) {
+	function check_admin_referer( $action = -1, $query_arg = '_wpnonce' ) {
+		if ( isset( $GLOBALS['wcpg_mock_nonce_ok'] ) && false === $GLOBALS['wcpg_mock_nonce_ok'] ) {
+			throw new Exception( 'check_admin_referer: nonce verification failed' );
+		}
+		return 1;
+	}
+}
+
+// Mock nocache_headers function.
+if ( ! function_exists( 'nocache_headers' ) ) {
+	function nocache_headers() {
+		// No-op in tests.
+	}
+}
+
+// Mock wp_tempnam function.
+if ( ! function_exists( 'wp_tempnam' ) ) {
+	function wp_tempnam( $filename = '', $dir = '' ) {
+		return tempnam( sys_get_temp_dir(), 'wcpg_' );
 	}
 }
 
