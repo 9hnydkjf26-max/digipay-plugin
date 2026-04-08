@@ -42,6 +42,10 @@ class WCPG_Report_Renderer {
 			$this->render_environment_detail( $out, $bundle['environment_detail'] );
 		}
 
+		if ( isset( $bundle['baseline_comparison'] ) && is_array( $bundle['baseline_comparison'] ) ) {
+			$this->render_baseline_comparison( $out, $bundle['baseline_comparison'] );
+		}
+
 		$this->section( $out, 'Encryption Key Status', isset( $bundle['encryption_key_status'] ) ? $bundle['encryption_key_status'] : array() );
 
 		$out[] = '## Gateways';
@@ -389,6 +393,62 @@ class WCPG_Report_Renderer {
 			}
 			$out[] = '';
 		}
+	}
+
+	/**
+	 * Render the "Changes Since Last Healthy Run" baseline comparison section.
+	 *
+	 * @param array $out        Output buffer (passed by reference).
+	 * @param array $comparison Comparison array from WCPG_Baseline::compare().
+	 */
+	protected function render_baseline_comparison( array &$out, array $comparison ) {
+		$out[] = '## Changes Since Last Healthy Run';
+		$out[] = '';
+
+		$available    = isset( $comparison['available'] ) ? (bool) $comparison['available'] : false;
+		$recorded_at  = isset( $comparison['baseline_recorded_at'] ) ? $comparison['baseline_recorded_at'] : null;
+
+		if ( ! $available || null === $recorded_at ) {
+			$out[] = '_No baseline recorded yet. The baseline is captured after the first successful Diagnose My Site run with no issues._';
+			$out[] = '';
+			return;
+		}
+
+		$metric_labels = array(
+			'api_response_time_ms'  => 'API response time (ms)',
+			'postback_success_rate' => 'Postback success rate',
+			'webhook_processed'     => 'Webhook processed (24h)',
+			'webhook_hmac_fail'     => 'Webhook HMAC failures (24h)',
+			'php_memory_peak_mb'    => 'PHP memory peak (MB)',
+		);
+
+		$out[] = '| Metric | Current | Baseline | Δ |';
+		$out[] = '|--------|---------|----------|---|';
+
+		foreach ( $metric_labels as $key => $label ) {
+			if ( ! isset( $comparison[ $key ] ) ) {
+				continue;
+			}
+			$entry    = $comparison[ $key ];
+			$current  = isset( $entry['current'] )   ? $entry['current']   : null;
+			$baseline = isset( $entry['baseline'] )  ? $entry['baseline']  : null;
+			$delta    = isset( $entry['delta_pct'] ) ? $entry['delta_pct'] : null;
+
+			$current_str  = null !== $current  ? (string) $current  : '—';
+			$baseline_str = null !== $baseline ? (string) $baseline : '—';
+
+			if ( null === $delta ) {
+				$delta_str = '—';
+			} else {
+				$delta_str = ( $delta >= 0 ? '+' : '' ) . $delta . '%';
+			}
+
+			$out[] = sprintf( '| %s | %s | %s | %s |', $label, $current_str, $baseline_str, $delta_str );
+		}
+
+		$out[] = '';
+		$out[] = '_Baseline recorded at: ' . $recorded_at . '_';
+		$out[] = '';
 	}
 
 	/**

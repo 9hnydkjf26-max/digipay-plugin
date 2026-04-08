@@ -413,6 +413,11 @@ class WCPG_Support_Admin_Page {
 			$bundle_meta = array( 'error' => $e->getMessage() );
 		}
 
+		// Record a healthy baseline when zero issues are detected.
+		if ( empty( $matched ) && class_exists( 'WCPG_Baseline' ) ) {
+			WCPG_Baseline::record( $bundle );
+		}
+
 		set_transient(
 			'wcpg_last_diagnose_results',
 			array(

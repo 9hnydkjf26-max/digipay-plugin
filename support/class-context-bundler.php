@@ -59,22 +59,41 @@ class WCPG_Context_Bundler {
 	 * @return array
 	 */
 	public function build() {
+		// Build sections that baseline comparison reads first so we can pass
+		// them to WCPG_Baseline::compare() without triggering recursion.
+		$diagnostics      = $this->build_diagnostics();
+		$webhook_health   = $this->build_webhook_health();
+		$env_detail       = $this->build_environment_detail();
+		$option_snapshots = $this->build_option_snapshots();
+
+		// Compute baseline comparison from the partial bundle.
+		$partial_for_compare = array(
+			'diagnostics'      => $diagnostics,
+			'webhook_health'   => $webhook_health,
+			'environment_detail' => $env_detail,
+			'option_snapshots' => $option_snapshots,
+		);
+		$baseline_comparison = class_exists( 'WCPG_Baseline' )
+			? WCPG_Baseline::compare( $partial_for_compare )
+			: array( 'available' => false, 'baseline_recorded_at' => null );
+
 		$bundle = array(
-			'bundle_meta'          => $this->build_meta(),
-			'site'                 => $this->build_site(),
-			'environment'          => $this->build_environment(),
-			'environment_detail'   => $this->build_environment_detail(),
-			'gateways'             => $this->build_gateways(),
+			'bundle_meta'           => $this->build_meta(),
+			'site'                  => $this->build_site(),
+			'environment'           => $this->build_environment(),
+			'environment_detail'    => $env_detail,
+			'baseline_comparison'   => $baseline_comparison,
+			'gateways'              => $this->build_gateways(),
 			'encryption_key_status' => $this->build_encryption_key_status(),
-			'diagnostics'          => $this->build_diagnostics(),
-			'connectivity_tests'   => $this->build_connectivity_tests(),
-			'webhook_health'       => $this->build_webhook_health(),
-			'recent_failed_orders' => $this->build_recent_failed_orders(),
-			'order_correlations'   => $this->build_order_correlations(),
-			'logs'                 => $this->build_logs(),
-			'events'               => $this->build_events(),
-			'settings_changes'     => $this->build_settings_changes(),
-			'option_snapshots'     => $this->build_option_snapshots(),
+			'diagnostics'           => $diagnostics,
+			'connectivity_tests'    => $this->build_connectivity_tests(),
+			'webhook_health'        => $webhook_health,
+			'recent_failed_orders'  => $this->build_recent_failed_orders(),
+			'order_correlations'    => $this->build_order_correlations(),
+			'logs'                  => $this->build_logs(),
+			'events'                => $this->build_events(),
+			'settings_changes'      => $this->build_settings_changes(),
+			'option_snapshots'      => $option_snapshots,
 		);
 
 		// Add content hash at the end (excludes itself).
