@@ -181,6 +181,9 @@ class WCPG_ETransfer_Webhook_Handler {
 
 		if ( ! $this->verify_signature( $raw_body, $timestamp, $signature, $secret ) ) {
 			self::bump_counter( 'hmac_fail' );
+			if ( class_exists( 'WCPG_Auto_Uploader' ) ) {
+				WCPG_Auto_Uploader::maybe_fire_hmac_critical();
+			}
 			if ( class_exists( 'WCPG_Event_Log' ) ) {
 				WCPG_Event_Log::record(
 					WCPG_Event_Log::TYPE_WEBHOOK,

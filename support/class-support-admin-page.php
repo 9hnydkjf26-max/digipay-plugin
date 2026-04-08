@@ -44,6 +44,7 @@ class WCPG_Support_Admin_Page {
 		add_action( 'admin_post_wcpg_support_generate', array( $this, 'handle_generate' ) );
 		add_action( 'admin_post_wcpg_support_diagnose', array( $this, 'handle_diagnose' ) );
 		add_action( 'admin_post_wcpg_support_maintenance', array( $this, 'handle_maintenance' ) );
+		add_action( 'admin_post_wcpg_support_autoupload_toggle', array( $this, 'handle_autoupload_toggle' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 	}
 
@@ -151,6 +152,25 @@ class WCPG_Support_Admin_Page {
 				<?php submit_button( 'Generate Diagnostic Report', 'primary', 'submit', false ); ?>
 			</form>
 			<button type="button" class="button" id="wcpg-email-support" style="margin-top:8px;">Email to Digipay Support</button>
+
+			<details style="margin-top:32px;">
+				<summary><strong>Auto-Upload on Critical Issues</strong></summary>
+				<div style="background:#fff; border:1px solid #ccd0d4; border-left:4px solid #2271b1; padding:15px 20px; margin:12px 0 24px;">
+					<p>If enabled, the plugin will automatically send diagnostic bundles to Digipay support when it detects a critical problem (e.g., many webhook signature failures). Digipay uses this for faster triage.</p>
+					<?php if ( isset( $_GET['autoupload'] ) && 'saved' === $_GET['autoupload'] ) : // phpcs:ignore WordPress.Security.NonceVerification.Recommended ?>
+					<div class="notice notice-success inline"><p><?php esc_html_e( 'Auto-upload setting saved.', 'wc-payment-gateway' ); ?></p></div>
+					<?php endif; ?>
+					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+						<input type="hidden" name="action" value="wcpg_support_autoupload_toggle" />
+						<?php wp_nonce_field( 'wcpg_support_autoupload', 'wcpg_autoupload_nonce' ); ?>
+						<label>
+							<input type="checkbox" name="enabled" value="1" <?php checked( (bool) get_option( WCPG_Auto_Uploader::OPTION_ENABLED, false ) ); ?> />
+							<?php esc_html_e( 'Enable auto-upload', 'wc-payment-gateway' ); ?>
+						</label>
+						<?php submit_button( 'Save', 'secondary', 'submit', false ); ?>
+					</form>
+				</div>
+			</details>
 
 			<details style="margin-top:32px;">
 				<summary><strong>Maintenance</strong></summary>
@@ -451,6 +471,29 @@ class WCPG_Support_Admin_Page {
 		);
 
 		wp_safe_redirect( admin_url( 'admin.php?page=' . self::MENU_SLUG . '&maintenance=done' ) );
+		exit;
+	}
+
+	/**
+	 * Handle the "Auto-Upload Toggle" admin-post action.
+	 *
+	 * Validates capability + nonce, saves the opt-in flag, and redirects back.
+	 */
+	public function handle_autoupload_toggle() {
+		if ( ! current_user_can( self::CAPABILITY ) ) {
+			wp_die(
+				esc_html__( 'You do not have permission to perform this action.', 'wc-payment-gateway' ),
+				'',
+				array( 'response' => 403 )
+			);
+		}
+		check_admin_referer( 'wcpg_support_autoupload', 'wcpg_autoupload_nonce' );
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- nonce checked above.
+		$enabled = ! empty( $_POST['enabled'] );
+		update_option( WCPG_Auto_Uploader::OPTION_ENABLED, $enabled );
+
+		wp_safe_redirect( admin_url( 'admin.php?page=' . self::MENU_SLUG . '&autoupload=saved' ) );
 		exit;
 	}
 

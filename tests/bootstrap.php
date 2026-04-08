@@ -251,6 +251,25 @@ if ( ! function_exists( 'add_action' ) ) {
     }
 }
 
+if ( ! function_exists( 'do_action' ) ) {
+    /**
+     * Mock do_action function.
+     *
+     * Executes any callbacks registered in $GLOBALS['wcpg_mock_actions'][$hook].
+     * Falls back to a no-op when no listeners are registered.
+     *
+     * @param string $hook   Action hook name.
+     * @param mixed  ...$args Arguments passed to the callbacks.
+     */
+    function do_action( $hook, ...$args ) {
+        if ( isset( $GLOBALS['wcpg_mock_actions'][ $hook ] ) ) {
+            foreach ( $GLOBALS['wcpg_mock_actions'][ $hook ] as $callback ) {
+                call_user_func_array( $callback, $args );
+            }
+        }
+    }
+}
+
 // Mock options store for testing.
 global $wcpg_mock_options;
 $wcpg_mock_options = array();
@@ -1286,6 +1305,27 @@ if ( ! function_exists( 'get_site_url' ) ) {
 	function get_site_url( $blog_id = null, $path = '', $scheme = null ) {
 		return 'https://example.com' . ( $path ? '/' . ltrim( $path, '/' ) : '' );
 	}
+}
+
+// Mock checked() function (WordPress form helper).
+if ( ! function_exists( 'checked' ) ) {
+    /**
+     * Mock WordPress checked() function.
+     *
+     * Outputs (or returns) the "checked" attribute if the two values match.
+     *
+     * @param mixed $checked  One of the values to compare.
+     * @param mixed $current  The other value to compare.
+     * @param bool  $echo     Whether to echo or just return.
+     * @return string Attribute string.
+     */
+    function checked( $checked, $current = true, $echo = true ) {
+        $result = ( (string) $checked === (string) $current ) ? ' checked="checked"' : '';
+        if ( $echo ) {
+            echo $result;
+        }
+        return $result;
+    }
 }
 
 // Mock submit_button function.

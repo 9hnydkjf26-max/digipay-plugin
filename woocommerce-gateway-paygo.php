@@ -81,11 +81,16 @@ function wcpg_init_modules() {
     }
     require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-support-admin-page.php';
     require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-gateway-issue-notices.php';
+    require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-auto-uploader.php';
     if ( class_exists( 'WCPG_Gateway_Issue_Notices' ) ) {
         ( new WCPG_Gateway_Issue_Notices() )->register();
     }
     if ( is_admin() && class_exists( 'WCPG_Support_Admin_Page' ) ) {
         ( new WCPG_Support_Admin_Page() )->register();
+    }
+    if ( class_exists( 'WCPG_Auto_Uploader' ) ) {
+        ( new WCPG_Auto_Uploader() )->register();
+        register_shutdown_function( array( 'WCPG_Auto_Uploader', 'check_for_fatals' ) );
     }
 
     // Initialize GitHub auto-updater.
