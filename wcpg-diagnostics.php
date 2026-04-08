@@ -947,12 +947,6 @@ function wcpg_render_diagnostics_content( $base_url = null ) {
                 }
             }
 
-            if ( $action === 'reset_postback_stats' ) {
-                delete_option( 'wcpg_postback_stats' );
-                wcpg_report_health();
-                echo '<div class="notice notice-success"><p>Postback statistics reset.</p></div>';
-            }
-
             if ( $action === 'report_health' ) {
                 $success = wcpg_report_health();
                 if ( $success ) {
@@ -1196,7 +1190,6 @@ function wcpg_render_diagnostics_content( $base_url = null ) {
                 <br><small style="color: #666;">
                     <span style="color: #00a32a;">✓ <?php echo esc_html( $postback_stats['success_count'] ); ?></span> successful,
                     <span style="color: #dc3232;">✗ <?php echo esc_html( $postback_stats['error_count'] ); ?></span> failed
-                    <a href="<?php echo esc_url( wp_nonce_url( add_query_arg( 'wcpg_action', 'reset_postback_stats', $base_url ), 'wcpg_admin_action' ) ); ?>" style="margin-left: 10px;" onclick="return confirm('Reset postback statistics?');">Reset</a>
                 </small>
 
                 <?php if ( $postback_stats['last_received'] ) : ?>

@@ -1281,6 +1281,13 @@ if ( ! function_exists( 'home_url' ) ) {
 	}
 }
 
+// Mock get_site_url function.
+if ( ! function_exists( 'get_site_url' ) ) {
+	function get_site_url( $blog_id = null, $path = '', $scheme = null ) {
+		return 'https://example.com' . ( $path ? '/' . ltrim( $path, '/' ) : '' );
+	}
+}
+
 // Mock submit_button function.
 if ( ! function_exists( 'submit_button' ) ) {
 	function submit_button( $text = 'Save Changes', $type = 'primary', $name = 'submit', $wrap = true, $other_attributes = '' ) {
@@ -1312,6 +1319,28 @@ if ( ! function_exists( 'check_admin_referer' ) ) {
 			throw new Exception( 'check_admin_referer: nonce verification failed' );
 		}
 		return 1;
+	}
+}
+
+// Mock wp_die function.
+// Throws a WPDieException so callers can catch it in tests.
+if ( ! class_exists( 'WPDieException' ) ) {
+	class WPDieException extends Exception {}
+}
+
+if ( ! function_exists( 'wp_die' ) ) {
+	/**
+	 * Mock wp_die function.
+	 *
+	 * Throws WPDieException so tests can catch it instead of halting.
+	 *
+	 * @param string|WP_Error $message Message to display.
+	 * @param string          $title   Title.
+	 * @param int|array       $args    Response code or args array.
+	 */
+	function wp_die( $message = '', $title = '', $args = array() ) {
+		$code = is_array( $args ) && isset( $args['response'] ) ? $args['response'] : 500;
+		throw new WPDieException( is_string( $message ) ? $message : 'wp_die called', $code );
 	}
 }
 
