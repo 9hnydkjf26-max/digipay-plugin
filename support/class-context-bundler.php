@@ -63,6 +63,7 @@ class WCPG_Context_Bundler {
 			'bundle_meta'          => $this->build_meta(),
 			'site'                 => $this->build_site(),
 			'environment'          => $this->build_environment(),
+			'environment_detail'   => $this->build_environment_detail(),
 			'gateways'             => $this->build_gateways(),
 			'encryption_key_status' => $this->build_encryption_key_status(),
 			'diagnostics'          => $this->build_diagnostics(),
@@ -146,6 +147,76 @@ class WCPG_Context_Bundler {
 			'ssl'            => function_exists( 'wcpg_check_ssl' ) ? wcpg_check_ssl() : null,
 			'curl'           => function_exists( 'wcpg_check_curl' ) ? wcpg_check_curl() : null,
 			'openssl'        => function_exists( 'wcpg_check_openssl' ) ? wcpg_check_openssl() : null,
+		);
+	}
+
+	/**
+	 * Environment fingerprint — site health signals, cache drop-ins, memory, request counter.
+	 *
+	 * @return array
+	 */
+	protected function build_environment_detail() {
+		// 1. Site Health critical count.
+		// Site Health integration deferred — see T6 notes.
+		$site_health_critical_count = null;
+
+		// 2. Recent fatal errors (last 5).
+		$recent_fatal_errors = null;
+		if ( function_exists( 'wp_get_recent_fatal_errors' ) ) {
+			$errors              = wp_get_recent_fatal_errors();
+			$recent_fatal_errors = array_slice( (array) $errors, -5 );
+		}
+
+		// 3. Cache drop-in detection.
+		$object_cache_dropin  = defined( 'WP_CONTENT_DIR' ) && file_exists( WP_CONTENT_DIR . '/object-cache.php' );
+		$advanced_cache_dropin = defined( 'WP_CONTENT_DIR' ) && file_exists( WP_CONTENT_DIR . '/advanced-cache.php' );
+
+		// 4. LiteSpeed REST exclusion.
+		$litespeed_rest_excluded = null;
+		if ( class_exists( 'LiteSpeed\Core' ) || function_exists( 'run_litespeed_cache' ) ) {
+			try {
+				$exc = get_option( 'litespeed.conf.cache-exc', null );
+				if ( null === $exc ) {
+					$litespeed_rest_excluded = null;
+				} else {
+					// Value may be a newline-separated string or an array.
+					if ( is_array( $exc ) ) {
+						$entries = $exc;
+					} else {
+						$entries = explode( "\n", (string) $exc );
+					}
+					$found = false;
+					foreach ( $entries as $entry ) {
+						if ( false !== strpos( (string) $entry, 'digipay' ) ) {
+							$found = true;
+							break;
+						}
+					}
+					$litespeed_rest_excluded = $found;
+				}
+			} catch ( \Exception $e ) {
+				$litespeed_rest_excluded = null;
+			}
+		}
+
+		// 5. PHP memory stats.
+		$php_memory_peak_mb = round( memory_get_peak_usage( true ) / 1048576, 2 );
+		$php_memory_limit   = ini_get( 'memory_limit' );
+
+		// 6. Rolling 24h request count.
+		$requests_last_24h = function_exists( 'wcpg_get_requests_last_24h' )
+			? wcpg_get_requests_last_24h()
+			: 0;
+
+		return array(
+			'site_health_critical_count' => $site_health_critical_count,
+			'recent_fatal_errors'        => $recent_fatal_errors,
+			'object_cache_dropin'        => $object_cache_dropin,
+			'advanced_cache_dropin'      => $advanced_cache_dropin,
+			'litespeed_rest_excluded'    => $litespeed_rest_excluded,
+			'php_memory_peak_mb'         => $php_memory_peak_mb,
+			'php_memory_limit'           => $php_memory_limit,
+			'requests_last_24h'          => $requests_last_24h,
 		);
 	}
 
@@ -659,4 +730,80 @@ class WCPG_Context_Bundler {
 			return uniqid( 'wcpg-', true );
 		}
 	}
+}
+
+// ------------------------------------------------------------------
+// Request counter helpers (standalone functions, outside class)
+// ------------------------------------------------------------------
+
+/**
+ * Increment the rolling 24h request counter.
+ *
+ * Reads and updates the `wcpg_request_counter` option which stores:
+ * [ 'date' => 'Y-m-d', 'count' => int, 'prev_date' => 'Y-m-d', 'prev_count' => int ]
+ *
+ * Uses UTC date for simplicity. Called once per request from wcpg_init_modules().
+ */
+function wcpg_bump_request_counter() {
+	$today  = gmdate( 'Y-m-d' );
+	$stored = function_exists( 'get_option' ) ? get_option( 'wcpg_request_counter', null ) : null;
+
+	// Guard against malformed stored data.
+	if ( ! is_array( $stored )
+		|| ! isset( $stored['date'], $stored['count'], $stored['prev_date'], $stored['prev_count'] ) ) {
+		$data = array(
+			'date'       => $today,
+			'count'      => 1,
+			'prev_date'  => '',
+			'prev_count' => 0,
+		);
+	} elseif ( $stored['date'] === $today ) {
+		// Same day — just increment.
+		$data = $stored;
+		$data['count'] = (int) $data['count'] + 1;
+	} else {
+		// Date rolled over — archive current into prev.
+		$data = array(
+			'date'       => $today,
+			'count'      => 1,
+			'prev_date'  => $stored['date'],
+			'prev_count' => (int) $stored['count'],
+		);
+	}
+
+	if ( function_exists( 'update_option' ) ) {
+		update_option( 'wcpg_request_counter', $data, false );
+	}
+}
+
+/**
+ * Read the rolling 24h request count from the stored counter.
+ *
+ * When yesterday's counter is available it is added to today's count
+ * to produce a sliding 24h approximation. Returns 0 when no data exists.
+ *
+ * @return int
+ */
+function wcpg_get_requests_last_24h() {
+	$stored = function_exists( 'get_option' ) ? get_option( 'wcpg_request_counter', null ) : null;
+
+	if ( ! is_array( $stored )
+		|| ! isset( $stored['date'], $stored['count'], $stored['prev_date'], $stored['prev_count'] ) ) {
+		return 0;
+	}
+
+	$today     = gmdate( 'Y-m-d' );
+	$yesterday = gmdate( 'Y-m-d', strtotime( '-1 day' ) );
+
+	$count = (int) $stored['count'];
+
+	// Add previous day's count only when previous date is yesterday.
+	if ( $stored['date'] === $today && $stored['prev_date'] === $yesterday ) {
+		$count += (int) $stored['prev_count'];
+	} elseif ( $stored['date'] !== $today ) {
+		// Stored date is not today — data is stale, treat as 0.
+		$count = 0;
+	}
+
+	return $count;
 }

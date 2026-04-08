@@ -37,6 +37,11 @@ class WCPG_Report_Renderer {
 
 		$this->section( $out, 'Site', isset( $bundle['site'] ) ? $bundle['site'] : array() );
 		$this->section( $out, 'Environment', isset( $bundle['environment'] ) ? $bundle['environment'] : array() );
+
+		if ( isset( $bundle['environment_detail'] ) && is_array( $bundle['environment_detail'] ) ) {
+			$this->render_environment_detail( $out, $bundle['environment_detail'] );
+		}
+
 		$this->section( $out, 'Encryption Key Status', isset( $bundle['encryption_key_status'] ) ? $bundle['encryption_key_status'] : array() );
 
 		$out[] = '## Gateways';
@@ -110,6 +115,72 @@ class WCPG_Report_Renderer {
 		$out[] = '_SHA-256: ' . ( $meta['content_sha256'] ?? 'unknown' ) . '_';
 
 		return implode( "\n", $out ) . "\n";
+	}
+
+	/**
+	 * Render the Environment Detail section as a human-readable markdown list.
+	 *
+	 * @param array $out    Output buffer (passed by reference).
+	 * @param array $detail Environment detail array from the bundle.
+	 */
+	protected function render_environment_detail( array &$out, array $detail ) {
+		$out[] = '## Environment Detail';
+		$out[] = '';
+
+		$null_dash = function ( $val ) {
+			return null === $val ? '—' : $val;
+		};
+
+		// Site health critical count.
+		$health_count = isset( $detail['site_health_critical_count'] ) ? $detail['site_health_critical_count'] : null;
+		$out[] = '- **Site health critical issues:** ' . $null_dash( $health_count );
+
+		// Recent fatal errors count.
+		$fatal = isset( $detail['recent_fatal_errors'] ) ? $detail['recent_fatal_errors'] : null;
+		if ( null === $fatal ) {
+			$fatal_label = '—';
+		} else {
+			$fatal_label = count( (array) $fatal );
+		}
+		$out[] = '- **Recent fatal errors:** ' . $fatal_label;
+
+		// Drop-ins.
+		$object_cache   = ! empty( $detail['object_cache_dropin'] ) ? 'yes' : 'no';
+		$advanced_cache = ! empty( $detail['advanced_cache_dropin'] ) ? 'yes' : 'no';
+		$out[] = '- **object-cache.php drop-in:** ' . $object_cache;
+		$out[] = '- **advanced-cache.php drop-in:** ' . $advanced_cache;
+
+		// LiteSpeed REST exclusion.
+		$ls = isset( $detail['litespeed_rest_excluded'] ) ? $detail['litespeed_rest_excluded'] : null;
+		if ( null === $ls ) {
+			$ls_label = '— (LSCWP not detected)';
+		} elseif ( $ls ) {
+			$ls_label = 'present';
+		} else {
+			$ls_label = 'missing';
+		}
+		$out[] = '- **LiteSpeed REST exclusion:** ' . $ls_label;
+
+		// Memory.
+		$peak  = isset( $detail['php_memory_peak_mb'] ) ? $detail['php_memory_peak_mb'] : '—';
+		$limit = isset( $detail['php_memory_limit'] )   ? $detail['php_memory_limit']   : '—';
+		$out[] = '- **PHP memory peak:** ' . $peak . ' MB (limit: ' . $limit . ')';
+
+		// Request counter.
+		$requests = isset( $detail['requests_last_24h'] ) ? $detail['requests_last_24h'] : 0;
+		$out[] = '- **Requests (last 24h):** ' . $requests;
+
+		$out[] = '';
+
+		// If there are recent fatal errors, dump them as a fenced block.
+		if ( null !== $fatal && is_array( $fatal ) && count( $fatal ) > 0 ) {
+			$out[] = '**Recent fatal errors:**';
+			$out[] = '';
+			$out[] = '```json';
+			$out[] = wp_json_encode( $fatal, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES );
+			$out[] = '```';
+			$out[] = '';
+		}
 	}
 
 	/**

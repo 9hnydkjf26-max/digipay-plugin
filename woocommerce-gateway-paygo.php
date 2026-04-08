@@ -132,6 +132,11 @@ function wcpg_init_modules() {
 
     // Check WooCommerce version and register blocks compatibility.
     wcpg_check_woocommerce_version();
+
+    // Bump the rolling 24h request counter (one read+write per request).
+    if ( function_exists( 'wcpg_bump_request_counter' ) ) {
+        wcpg_bump_request_counter();
+    }
 }
 add_action( 'plugins_loaded', 'wcpg_init_modules', 0 );
 
