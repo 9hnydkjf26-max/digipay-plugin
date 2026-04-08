@@ -513,20 +513,28 @@ class WCPG_Support_Admin_Page {
 	 * @return array
 	 */
 	private function build_orders_tile() {
-		$count = 0;
+		$count   = 0;
+		$allowed = array( 'paygobillingcc', 'digipay_etransfer', 'wcpg_crypto' );
 
 		try {
 			if ( function_exists( 'wc_get_orders' ) ) {
 				$orders = wc_get_orders(
 					array(
-						'payment_method' => array( 'paygobillingcc', 'digipay_etransfer', 'wcpg_crypto' ),
+						'payment_method' => $allowed,
 						'status'         => array( 'wc-failed', 'wc-on-hold', 'wc-pending' ),
 						'date_after'     => gmdate( 'Y-m-d', strtotime( '-7 days' ) ),
-						'return'         => 'ids',
+						'return'         => 'objects',
 						'limit'          => 100,
 					)
 				);
-				$count = is_array( $orders ) ? count( $orders ) : 0;
+				// Post-filter in PHP as a belt-and-braces measure: some WooCommerce
+				// versions do not honour the payment_method arg in wc_get_orders().
+				foreach ( (array) $orders as $o ) {
+					if ( is_object( $o ) && method_exists( $o, 'get_payment_method' )
+						&& in_array( $o->get_payment_method(), $allowed, true ) ) {
+						$count++;
+					}
+				}
 			}
 		} catch ( \Throwable $e ) {
 			$count = 0;

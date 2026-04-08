@@ -234,6 +234,82 @@ class StatusTilesTest extends DigipayTestCase {
 		$this->assertStringContainsString( '10', $tile['detail'] );
 	}
 
+	// ── Boundary tests ────────────────────────────────────────────────────────
+
+	public function test_postbacks_at_exact_5pct_is_yellow() {
+		// 5/100 = 0.05 exactly. Spec: < 0.05 is green, so 0.05 itself is yellow.
+		global $wcpg_mock_options;
+		$wcpg_mock_options['wcpg_postback_stats'] = array(
+			'success_count' => 95,
+			'error_count'   => 5,
+		);
+		$tiles = $this->get_tiles();
+		$tile  = $tiles[0];
+		$this->assertSame( 'yellow', $tile['status'], '5% error rate should be yellow (boundary at < 0.05 for green)' );
+	}
+
+	public function test_postbacks_at_20pct_is_yellow() {
+		// 20/100 = 0.20 exactly. Spec: > 0.20 is red, so 0.20 itself is yellow.
+		global $wcpg_mock_options;
+		$wcpg_mock_options['wcpg_postback_stats'] = array(
+			'success_count' => 80,
+			'error_count'   => 20,
+		);
+		$tiles = $this->get_tiles();
+		$tile  = $tiles[0];
+		$this->assertSame( 'yellow', $tile['status'], '20% error rate should be yellow (boundary at <= 0.20 for yellow)' );
+	}
+
+	public function test_postbacks_just_above_20pct_is_red() {
+		// 21/100 = 0.21. Spec: > 0.20 is red.
+		global $wcpg_mock_options;
+		$wcpg_mock_options['wcpg_postback_stats'] = array(
+			'success_count' => 79,
+			'error_count'   => 21,
+		);
+		$tiles = $this->get_tiles();
+		$tile  = $tiles[0];
+		$this->assertSame( 'red', $tile['status'], '21% error rate should be red' );
+	}
+
+	public function test_webhook_at_5_failures_is_yellow() {
+		// hmac_fail=5: spec says 1-5 is yellow.
+		global $wcpg_test_transients;
+		$wcpg_test_transients['wcpg_etw_health'] = array(
+			'value'      => array( 'processed' => 10, 'hmac_fail' => 5 ),
+			'expiration' => 86400,
+		);
+		$tiles = $this->get_tiles();
+		$tile  = $tiles[1];
+		$this->assertSame( 'yellow', $tile['status'], 'hmac_fail=5 should be yellow (boundary at <= 5)' );
+	}
+
+	public function test_webhook_at_6_failures_is_red() {
+		// hmac_fail=6: spec says 6+ is red.
+		global $wcpg_test_transients;
+		$wcpg_test_transients['wcpg_etw_health'] = array(
+			'value'      => array( 'processed' => 10, 'hmac_fail' => 6 ),
+			'expiration' => 86400,
+		);
+		$tiles = $this->get_tiles();
+		$tile  = $tiles[1];
+		$this->assertSame( 'red', $tile['status'], 'hmac_fail=6 should be red' );
+	}
+
+	public function test_api_at_exact_1000ms_is_yellow() {
+		// response_time_ms=1000. Spec: < 1000 is green, so 1000 itself is yellow.
+		global $wcpg_mock_options;
+		$wcpg_mock_options['wcpg_api_last_test'] = array(
+			'time'             => '2026-04-07T12:00:00Z',
+			'success'          => true,
+			'response_time_ms' => 1000,
+		);
+		$tiles = $this->get_tiles();
+		$tile  = $tiles[2];
+		$this->assertSame( 'yellow', $tile['status'], '1000ms should be yellow (boundary at < 1000 for green)' );
+		$this->assertSame( 'Slow', $tile['headline'] );
+	}
+
 	// ── Orders tile ───────────────────────────────────────────────────────────
 
 	public function test_orders_tile_returns_structure_without_woocommerce() {
