@@ -73,6 +73,11 @@ class WCPG_Report_Renderer {
 		}
 		$out[] = '';
 
+		$this->render_order_correlations(
+			$out,
+			isset( $bundle['order_correlations'] ) ? $bundle['order_correlations'] : array()
+		);
+
 		$out[] = '## Logs';
 		$out[] = '';
 		if ( ! empty( $bundle['logs'] ) && is_array( $bundle['logs'] ) ) {
@@ -188,6 +193,131 @@ class WCPG_Report_Renderer {
 			);
 		}
 		$out[] = '';
+	}
+
+	/**
+	 * Render the Order Correlations section (one subsection per order).
+	 *
+	 * @param array $out          Output buffer (passed by reference).
+	 * @param array $correlations Correlation entries from the bundle.
+	 */
+	protected function render_order_correlations( array &$out, array $correlations ) {
+		$out[] = '## Order Correlations';
+		$out[] = '';
+
+		if ( empty( $correlations ) ) {
+			$out[] = '_No orders to correlate._';
+			$out[] = '';
+			return;
+		}
+
+		foreach ( $correlations as $entry ) {
+			$id = isset( $entry['order_id'] ) ? $entry['order_id'] : '?';
+			$out[] = '### Order #' . $id;
+			$out[] = '';
+			$out[] = sprintf(
+				'- **Status:** %s · **Method:** %s · **Total:** %s %s · **Created:** %s',
+				isset( $entry['status'] )         ? $entry['status']         : '?',
+				isset( $entry['payment_method'] ) ? $entry['payment_method'] : '?',
+				isset( $entry['total'] )          ? $entry['total']          : '?',
+				isset( $entry['currency'] )       ? $entry['currency']       : '',
+				isset( $entry['date_created'] )   ? $entry['date_created']   : '?'
+			);
+			$out[] = '';
+
+			// Postback events.
+			$out[] = '**Postback events:**';
+			$out[] = '';
+			$events = isset( $entry['postback_events'] ) ? (array) $entry['postback_events'] : array();
+			if ( count( $events ) > 20 ) {
+				$events = array_slice( $events, -20 );
+			}
+			if ( empty( $events ) ) {
+				$out[] = '_none_';
+			} else {
+				foreach ( $events as $ev ) {
+					$ts      = isset( $ev['ts'] )             ? $ev['ts']              : '';
+					$type    = isset( $ev['type'] )           ? $ev['type']            : '';
+					$outcome = isset( $ev['data']['outcome'] ) ? $ev['data']['outcome'] : '?';
+					$out[]   = '- ' . $ts . ' · ' . $type . ' · outcome=' . $outcome;
+				}
+			}
+			$out[] = '';
+
+			// Webhook events.
+			$out[] = '**Webhook events:**';
+			$out[] = '';
+			$events = isset( $entry['webhook_events'] ) ? (array) $entry['webhook_events'] : array();
+			if ( count( $events ) > 20 ) {
+				$events = array_slice( $events, -20 );
+			}
+			if ( empty( $events ) ) {
+				$out[] = '_none_';
+			} else {
+				foreach ( $events as $ev ) {
+					$ts      = isset( $ev['ts'] )             ? $ev['ts']              : '';
+					$type    = isset( $ev['type'] )           ? $ev['type']            : '';
+					$outcome = isset( $ev['data']['outcome'] ) ? $ev['data']['outcome'] : '?';
+					$out[]   = '- ' . $ts . ' · ' . $type . ' · outcome=' . $outcome;
+				}
+			}
+			$out[] = '';
+
+			// API calls.
+			$out[] = '**API calls mentioning this order:**';
+			$out[] = '';
+			$events = isset( $entry['api_call_events'] ) ? (array) $entry['api_call_events'] : array();
+			if ( count( $events ) > 20 ) {
+				$events = array_slice( $events, -20 );
+			}
+			if ( empty( $events ) ) {
+				$out[] = '_none_';
+			} else {
+				foreach ( $events as $ev ) {
+					$ts      = isset( $ev['ts'] )             ? $ev['ts']              : '';
+					$type    = isset( $ev['type'] )           ? $ev['type']            : '';
+					$outcome = isset( $ev['data']['outcome'] ) ? $ev['data']['outcome'] : '?';
+					$out[]   = '- ' . $ts . ' · ' . $type . ' · outcome=' . $outcome;
+				}
+			}
+			$out[] = '';
+
+			// Recent notes.
+			$out[] = '**Recent notes:**';
+			$out[] = '';
+			$notes = isset( $entry['recent_notes'] ) ? (array) $entry['recent_notes'] : array();
+			if ( count( $notes ) > 20 ) {
+				$notes = array_slice( $notes, 0, 20 );
+			}
+			if ( empty( $notes ) ) {
+				$out[] = '_none_';
+			} else {
+				foreach ( $notes as $note ) {
+					$ts      = isset( $note['ts'] )      ? $note['ts']      : '';
+					$content = isset( $note['content'] ) ? $note['content'] : '';
+					$out[]   = '- ' . $ts . ': ' . $content;
+				}
+			}
+			$out[] = '';
+
+			// Status history.
+			$out[] = '**Status history:**';
+			$out[] = '';
+			$history = isset( $entry['status_history'] ) ? (array) $entry['status_history'] : array();
+			if ( count( $history ) > 20 ) {
+				$history = array_slice( $history, -20 );
+			}
+			if ( empty( $history ) ) {
+				$out[] = '_none_';
+			} else {
+				foreach ( $history as $hs ) {
+					$ts     = isset( $hs['ts'] )     ? $hs['ts']     : '';
+					$status = isset( $hs['status'] ) ? $hs['status'] : '';
+					$out[]  = '- ' . $ts . ': ' . $status;
+				}
+			}
+			$out[] = '';
+		}
 	}
 
 	/**

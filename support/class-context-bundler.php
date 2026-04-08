@@ -62,6 +62,7 @@ class WCPG_Context_Bundler {
 			'connectivity_tests'   => $this->build_connectivity_tests(),
 			'webhook_health'       => $this->build_webhook_health(),
 			'recent_failed_orders' => $this->build_recent_failed_orders(),
+			'order_correlations'   => $this->build_order_correlations(),
 			'logs'                 => $this->build_logs(),
 			'events'               => $this->build_events(),
 			'settings_changes'     => $this->build_settings_changes(),
@@ -265,6 +266,155 @@ class WCPG_Context_Bundler {
 				'etransfer_status'        => method_exists( $order, 'get_meta' ) ? $order->get_meta( '_etransfer_transaction_status' ) : null,
 			);
 		}
+		return $out;
+	}
+
+	/**
+	 * Build per-order correlation data: all events and notes for each recent failed order.
+	 *
+	 * @return array
+	 */
+	protected function build_order_correlations() {
+		$failed_orders = $this->build_recent_failed_orders();
+		if ( empty( $failed_orders ) ) {
+			return array();
+		}
+
+		// Pre-fetch event slices once to avoid repeated calls per order.
+		$postback_events  = class_exists( 'WCPG_Event_Log' )
+			? WCPG_Event_Log::recent( 500, WCPG_Event_Log::TYPE_POSTBACK )
+			: array();
+		$webhook_events   = class_exists( 'WCPG_Event_Log' )
+			? WCPG_Event_Log::recent( 500, WCPG_Event_Log::TYPE_WEBHOOK )
+			: array();
+		$api_call_events  = class_exists( 'WCPG_Event_Log' )
+			? WCPG_Event_Log::recent( 500, WCPG_Event_Log::TYPE_API_CALL )
+			: array();
+
+		$thirty_days_ago = time() - ( 30 * DAY_IN_SECONDS );
+		$out             = array();
+
+		foreach ( $failed_orders as $order_entry ) {
+			$order_id = isset( $order_entry['id'] ) ? (int) $order_entry['id'] : 0;
+			if ( $order_id <= 0 ) {
+				continue;
+			}
+
+			$etransfer_ref = isset( $order_entry['etransfer_reference'] )
+				? (string) $order_entry['etransfer_reference']
+				: '';
+
+			// --- Postback events ---
+			$matched_postbacks = array();
+			foreach ( $postback_events as $ev ) {
+				if ( isset( $ev['order_id'] ) && (int) $ev['order_id'] === $order_id ) {
+					$matched_postbacks[] = $ev;
+				}
+			}
+			if ( count( $matched_postbacks ) > 50 ) {
+				$matched_postbacks = array_slice( $matched_postbacks, -50 );
+			}
+
+			// --- Webhook events ---
+			$matched_webhooks = array();
+			foreach ( $webhook_events as $ev ) {
+				$matches_order = isset( $ev['order_id'] ) && (int) $ev['order_id'] === $order_id;
+				$matches_ref   = $etransfer_ref !== ''
+					&& isset( $ev['data']['reference'] )
+					&& (string) $ev['data']['reference'] === $etransfer_ref;
+				if ( $matches_order || $matches_ref ) {
+					$matched_webhooks[] = $ev;
+				}
+			}
+
+			// --- API call events ---
+			$matched_api = array();
+			$order_id_str = (string) $order_id;
+			foreach ( $api_call_events as $ev ) {
+				$url_str  = isset( $ev['data']['url'] )          ? (string) $ev['data']['url']          : '';
+				$body_str = isset( $ev['data']['body_preview'] ) ? (string) $ev['data']['body_preview'] : '';
+				if ( false !== strpos( $url_str, $order_id_str )
+					|| false !== strpos( $body_str, $order_id_str ) ) {
+					$matched_api[] = $ev;
+				}
+			}
+			if ( count( $matched_api ) > 20 ) {
+				$matched_api = array_slice( $matched_api, -20 );
+			}
+
+			// --- Recent order notes (last 10, last 30 days) ---
+			$recent_notes    = array();
+			$status_history  = array();
+
+			if ( function_exists( 'wc_get_order' ) ) {
+				$order_obj = wc_get_order( $order_id );
+
+				if ( $order_obj && is_object( $order_obj ) ) {
+					// Notes.
+					if ( method_exists( $order_obj, 'get_customer_order_notes' ) ) {
+						$notes = $order_obj->get_customer_order_notes();
+						if ( is_array( $notes ) ) {
+							// Filter to last 30 days.
+							foreach ( $notes as $note ) {
+								$note_ts = is_object( $note ) && isset( $note->comment_date_gmt )
+									? strtotime( $note->comment_date_gmt )
+									: 0;
+								if ( $note_ts < $thirty_days_ago ) {
+									continue;
+								}
+								$content = is_object( $note ) && isset( $note->comment_content )
+									? (string) $note->comment_content
+									: '';
+								$ts_str  = is_object( $note ) && isset( $note->comment_date_gmt )
+									? $note->comment_date_gmt
+									: '';
+								$recent_notes[] = array(
+									'ts'      => $ts_str,
+									'content' => self::scrub_pii( $content ),
+								);
+							}
+							// Most recent first, cap at 10.
+							$recent_notes = array_reverse( $recent_notes );
+							if ( count( $recent_notes ) > 10 ) {
+								$recent_notes = array_slice( $recent_notes, 0, 10 );
+							}
+						}
+					}
+
+					// Status history.
+					if ( method_exists( $order_obj, 'get_meta' ) ) {
+						$history_meta = $order_obj->get_meta( '_status_transition_history' );
+						if ( ! empty( $history_meta ) && is_array( $history_meta ) ) {
+							$status_history = $history_meta;
+						} elseif ( method_exists( $order_obj, 'get_status' )
+							&& method_exists( $order_obj, 'get_date_modified' )
+							&& $order_obj->get_date_modified() ) {
+							$status_history = array(
+								array(
+									'status' => $order_obj->get_status(),
+									'ts'     => $order_obj->get_date_modified()->format( 'c' ),
+								),
+							);
+						}
+					}
+				}
+			}
+
+			$out[] = array(
+				'order_id'        => $order_id,
+				'status'          => isset( $order_entry['status'] )         ? $order_entry['status']         : null,
+				'payment_method'  => isset( $order_entry['payment_method'] ) ? $order_entry['payment_method'] : null,
+				'total'           => isset( $order_entry['total'] )          ? $order_entry['total']          : null,
+				'currency'        => isset( $order_entry['currency'] )       ? $order_entry['currency']       : null,
+				'date_created'    => isset( $order_entry['date_created'] )   ? $order_entry['date_created']   : null,
+				'postback_events' => $matched_postbacks,
+				'webhook_events'  => $matched_webhooks,
+				'api_call_events' => $matched_api,
+				'recent_notes'    => $recent_notes,
+				'status_history'  => $status_history,
+			);
+		}
+
 		return $out;
 	}
 

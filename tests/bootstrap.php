@@ -1152,10 +1152,17 @@ if ( ! function_exists( 'wc_get_orders' ) ) {
 	/**
 	 * Mock wc_get_orders function.
 	 *
+	 * Returns all orders from $GLOBALS['wcpg_mock_orders'] when populated,
+	 * otherwise returns an empty array.
+	 *
 	 * @param array $args Query arguments.
 	 * @return array Array of orders.
 	 */
 	function wc_get_orders( $args = array() ) {
+		global $wcpg_mock_orders;
+		if ( ! empty( $wcpg_mock_orders ) && is_array( $wcpg_mock_orders ) ) {
+			return array_values( $wcpg_mock_orders );
+		}
 		return array();
 	}
 }
