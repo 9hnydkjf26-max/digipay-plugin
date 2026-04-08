@@ -91,30 +91,29 @@ class ContextBundlerTest extends DigipayTestCase {
 	}
 
 	/**
-	 * encryption_key_status contains a 12-character hex fingerprint.
+	 * encryption_key_status contains a null fingerprint under default state.
 	 */
 	public function test_encryption_key_status_contains_fingerprint() {
+		$this->assertFalse( defined( 'DIGIPAY_ENCRYPTION_KEY' ), 'Precondition: constant must be undefined for this test' );
+
 		$bundler = new WCPG_Context_Bundler();
 		$status  = $bundler->build_encryption_key_status();
 
 		$this->assertArrayHasKey( 'encryption_key_fingerprint', $status );
-		$fingerprint = $status['encryption_key_fingerprint'];
-		$this->assertIsString( $fingerprint );
-		$this->assertSame( 12, strlen( $fingerprint ) );
-		$this->assertMatchesRegularExpression( '/^[0-9a-f]{12}$/', $fingerprint );
+		$this->assertNull( $status['encryption_key_fingerprint'] );
 	}
 
 	/**
-	 * Fingerprint is derived from the SHA-256 of the key value.
+	 * Fingerprint is null when using_default is true (constant not defined).
 	 */
-	public function test_encryption_key_fingerprint_matches_sha256_prefix() {
-		// DIGIPAY_ENCRYPTION_KEY is not defined in test env, so $value = ''.
-		$expected_fingerprint = substr( hash( 'sha256', '' ), 0, 12 );
+	public function test_encryption_key_fingerprint_null_when_using_default() {
+		$this->assertFalse( defined( 'DIGIPAY_ENCRYPTION_KEY' ), 'Precondition: constant must be undefined for this test' );
 
 		$bundler = new WCPG_Context_Bundler();
 		$status  = $bundler->build_encryption_key_status();
 
-		$this->assertSame( $expected_fingerprint, $status['encryption_key_fingerprint'] );
+		$this->assertTrue( $status['using_default'] );
+		$this->assertNull( $status['encryption_key_fingerprint'] );
 	}
 
 	/**

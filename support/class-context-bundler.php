@@ -83,13 +83,13 @@ class WCPG_Context_Bundler {
 	 */
 	protected function build_meta() {
 		return array(
-			'schema_version'   => 1,
-			'bundle_id'        => $this->uuid4(),
-			'generated_at_utc' => gmdate( 'c' ),
-			'generated_at_pt'  => function_exists( 'wcpg_get_pacific_date' )
+			'schema_version'    => 1,
+			'bundle_id'         => $this->uuid4(),
+			'generated_at_utc'  => gmdate( 'c' ),
+			'generated_at_pt'   => function_exists( 'wcpg_get_pacific_date' )
 				? wcpg_get_pacific_date( 'c' )
 				: null,
-			'generator'        => 'WCPG_Context_Bundler',
+			'generator'         => 'WCPG_Context_Bundler',
 			'generator_version' => defined( 'WCPG_VERSION' ) ? WCPG_VERSION : 'unknown',
 		);
 	}
@@ -166,14 +166,17 @@ class WCPG_Context_Bundler {
 	public function build_encryption_key_status() {
 		$is_defined        = defined( 'DIGIPAY_ENCRYPTION_KEY' );
 		$value             = $is_defined ? DIGIPAY_ENCRYPTION_KEY : '';
+		// Mirror of the fallback in wcpg_get_encryption_key(); keep in sync.
 		$fallback_default  = 'fluidcastplgpaygowoo22';
 		$is_default        = ( ! $is_defined || empty( $value ) || $value === $fallback_default );
 
 		return array(
-			'constant_defined'          => $is_defined,
-			'length'                    => is_string( $value ) ? strlen( $value ) : 0,
-			'using_default'             => $is_default,
-			'encryption_key_fingerprint' => substr( hash( 'sha256', is_string( $value ) ? $value : '' ), 0, 12 ),
+			'constant_defined'           => $is_defined,
+			'length'                     => is_string( $value ) ? strlen( $value ) : 0,
+			'using_default'              => $is_default,
+			'encryption_key_fingerprint' => $is_default
+				? null
+				: substr( hash( 'sha256', $value ), 0, 12 ),
 		);
 	}
 
