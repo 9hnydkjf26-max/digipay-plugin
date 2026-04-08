@@ -75,6 +75,7 @@ function wcpg_init_modules() {
     require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-context-bundler.php';
     require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-report-renderer.php';
     require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-settings-change-watcher.php';
+    require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-issue-catalog.php';
     if ( class_exists( 'WCPG_Settings_Change_Watcher' ) ) {
         ( new WCPG_Settings_Change_Watcher() )->register();
     }
