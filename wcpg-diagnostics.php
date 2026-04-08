@@ -570,11 +570,16 @@ function wcpg_test_postback_url() {
         return $result;
     }
     
-    // Check for the expected response when no valid order is provided
-    // The postback should return: "Sorry, the order does not exist or is invalid."
-    // Check for key phrases that indicate the postback is working
+    // Check for the expected response when no valid order is provided.
+    // The REST handler may return any of:
+    //   - "Order not found" (current REST handler)
+    //   - stat:"order_not_found" (JSON code field)
+    //   - "order does not exist" / "order is invalid" (legacy PHP handler)
+    //   - "Sorry, the order does not exist or is invalid" (legacy template)
     $body_lower = strtolower( $body );
-    if ( strpos( $body_lower, 'order does not exist' ) !== false || 
+    if ( strpos( $body_lower, 'order not found' ) !== false ||
+         strpos( $body, 'order_not_found' ) !== false ||
+         strpos( $body_lower, 'order does not exist' ) !== false ||
          strpos( $body_lower, 'order is invalid' ) !== false ||
          strpos( $body, 'Sorry, the order does not exist or is invalid' ) !== false ) {
         $result['success'] = true;
@@ -627,7 +632,7 @@ function wcpg_test_postback_url() {
     $preview = preg_replace( '/\s+/', ' ', $preview ); // Normalize whitespace
     $preview = trim( $preview );
     
-    $result['message'] = 'Postback URL returned unexpected response. Expected "order does not exist" message.';
+    $result['message'] = 'Postback URL returned unexpected response. Expected an "order not found" / "order_not_found" message.';
     
     update_option( 'wcpg_postback_url_test', array(
         'time' => current_time( 'mysql' ),
