@@ -782,6 +782,154 @@ function wcpg_report_health() {
 }
 
 // ============================================================
+// INBOUND CONNECTIVITY TEST (External Request Check)
+// ============================================================
+
+/**
+ * Test if external requests can reach the postback URL.
+ *
+ * Calls the test-inbound-connectivity Supabase Edge Function, which makes
+ * an HTTP request back to this site's postback URL and reports the result.
+ * This simulates what the payment processor does when sending postbacks,
+ * exposing firewall/WAF/proxy issues that would otherwise silently drop
+ * real postback traffic.
+ *
+ * The POST body is HMAC-signed so the edge function can eventually enforce
+ * DIGIPAY_REQUIRE_SIGNATURE on this endpoint alongside the others. During
+ * the rollout window the edge function still accepts unsigned requests.
+ */
+function wcpg_test_inbound_connectivity() {
+    $result = array(
+        'success' => false,
+        'status' => 'error',
+        'message' => '',
+        'details' => '',
+        'response_time_ms' => 0,
+        'http_status' => null,
+        'tested_url' => ''
+    );
+
+    // Build the postback URL (use REST API endpoint).
+    // Append a cache-buster so CDN / caching plugins don't serve a stale 404.
+    $postback_url = add_query_arg( '_cb', time(), rest_url( 'digipay/v1/postback' ) );
+    $result['tested_url'] = $postback_url;
+
+    // Check if using HTTPS
+    if ( strpos( $postback_url, 'https://' ) !== 0 ) {
+        $result['message'] = 'Cannot test: Site must use HTTPS';
+        $result['details'] = 'The inbound connectivity test requires HTTPS. Update your site URL to use HTTPS.';
+
+        update_option( 'wcpg_inbound_test', array(
+            'time' => current_time( 'mysql' ),
+            'success' => false,
+            'message' => $result['message'],
+            'details' => $result['details']
+        ));
+
+        return $result;
+    }
+
+    // Get site ID for logging
+    $gateway = new WC_Gateway_Paygo_npaygo();
+    $site_id = $gateway->get_option( 'siteid' );
+
+    // Call the Edge Function to test inbound connectivity - use configurable URL
+    $test_url = $gateway->inbound_test_url;
+
+    $start_time = microtime( true );
+
+    $json_body = wp_json_encode( array(
+        'postback_url' => $postback_url,
+        'site_id'      => $site_id,
+    ) );
+    $headers = array_merge(
+        array( 'Content-Type' => 'application/json' ),
+        wcpg_sign_api_headers( $json_body )
+    );
+
+    $response = wcpg_http_request(
+        $test_url,
+        array(
+            'method'  => 'POST',
+            'timeout' => 30, // Allow more time since this involves two network hops
+            'headers' => $headers,
+            'body'    => $json_body,
+        )
+    );
+
+    $end_time = microtime( true );
+    $total_time = round( ( $end_time - $start_time ) * 1000 );
+
+    // Check for WP error (couldn't reach Edge Function)
+    if ( is_wp_error( $response ) ) {
+        $result['message'] = 'Could not reach test server: ' . $response->get_error_message();
+        $result['details'] = 'Unable to connect to the external test service. Check your outbound connectivity.';
+
+        update_option( 'wcpg_inbound_test', array(
+            'time' => current_time( 'mysql' ),
+            'success' => false,
+            'message' => $result['message'],
+            'details' => $result['details']
+        ));
+
+        return $result;
+    }
+
+    $http_code = wp_remote_retrieve_response_code( $response );
+    $body = wp_remote_retrieve_body( $response );
+    $data = json_decode( $body, true );
+
+    if ( $http_code !== 200 || ! $data ) {
+        $result['message'] = 'Test server returned an error (HTTP ' . $http_code . ')';
+        $result['details'] = 'The external test service encountered an issue.';
+
+        update_option( 'wcpg_inbound_test', array(
+            'time' => current_time( 'mysql' ),
+            'success' => false,
+            'message' => $result['message'],
+            'http_code' => $http_code
+        ));
+
+        return $result;
+    }
+
+    // Parse the result from Edge Function
+    $result['success'] = ! empty( $data['success'] );
+    $result['status'] = $result['success'] ? 'ok' : 'error';
+    $result['message'] = $data['message'] ?? 'Unknown result';
+    $result['details'] = $data['details'] ?? '';
+    $result['http_status'] = $data['http_status'] ?? null;
+    $result['response_time_ms'] = $data['response_time_ms'] ?? $total_time;
+
+    // Store result
+    update_option( 'wcpg_inbound_test', array(
+        'time' => current_time( 'mysql' ),
+        'success' => $result['success'],
+        'message' => $result['message'],
+        'details' => $result['details'],
+        'http_status' => $result['http_status'],
+        'response_time_ms' => $result['response_time_ms'],
+        'tested_url' => $postback_url
+    ));
+
+    return $result;
+}
+
+/**
+ * Get the last inbound connectivity test result
+ */
+function wcpg_get_inbound_test_result() {
+    return get_option( 'wcpg_inbound_test', array(
+        'time' => null,
+        'success' => null,
+        'message' => 'Not tested yet',
+        'details' => '',
+        'http_status' => null,
+        'response_time_ms' => null
+    ));
+}
+
+// ============================================================
 // ADMIN DIAGNOSTICS PAGE
 // ============================================================
 
@@ -815,6 +963,7 @@ function wcpg_render_diagnostics_content( $base_url = null ) {
             if ( $action === 'run_diagnostics' ) {
                 $results = wcpg_run_diagnostics();
                 wcpg_test_api_connection();
+                wcpg_test_inbound_connectivity();
                 wcpg_report_health();
 
                 if ( empty( $results['issues'] ) ) {
@@ -844,6 +993,32 @@ function wcpg_render_diagnostics_content( $base_url = null ) {
                 }
             }
 
+            if ( $action === 'test_inbound' ) {
+                $result = wcpg_test_inbound_connectivity();
+                wcpg_report_health();
+
+                if ( $result['success'] ) {
+                    echo '<div class="notice notice-success">';
+                    echo '<p><strong>✓ Inbound Connectivity Test Passed!</strong></p>';
+                    echo '<p>' . esc_html( $result['message'] ) . '</p>';
+                    if ( $result['details'] ) {
+                        echo '<p style="margin-top: 5px; color: #666;"><small>' . esc_html( $result['details'] ) . '</small></p>';
+                    }
+                    echo '</div>';
+                } else {
+                    echo '<div class="notice notice-error">';
+                    echo '<p><strong>✗ Inbound Connectivity Test Failed!</strong></p>';
+                    echo '<p>' . esc_html( $result['message'] ) . '</p>';
+                    if ( $result['details'] ) {
+                        echo '<p style="margin-top: 5px;"><strong>Recommendation:</strong> ' . esc_html( $result['details'] ) . '</p>';
+                    }
+                    if ( $result['http_status'] ) {
+                        echo '<p style="margin-top: 5px;"><small>HTTP Status: ' . esc_html( $result['http_status'] ) . ' | Tested URL: ' . esc_html( $result['tested_url'] ) . '</small></p>';
+                    }
+                    echo '</div>';
+                }
+            }
+
         }
     }
 
@@ -853,6 +1028,7 @@ function wcpg_render_diagnostics_content( $base_url = null ) {
     $diag_time     = isset( $diagnostics['timestamp'] ) ? $diagnostics['timestamp'] : null;
     $api_test      = get_option( 'wcpg_api_last_test', array() );
     $postback_stats = wcpg_get_postback_stats();
+    $inbound_test  = wcpg_get_inbound_test_result();
 
     // Calculate postback success rate.
     $postback_total = $postback_stats['success_count'] + $postback_stats['error_count'];
@@ -867,6 +1043,7 @@ function wcpg_render_diagnostics_content( $base_url = null ) {
     <div style="margin-bottom: 20px; display: flex; gap: 10px; flex-wrap: wrap;">
         <a href="<?php echo esc_url( wp_nonce_url( add_query_arg( 'wcpg_action', 'run_diagnostics', $base_url ), 'wcpg_admin_action' ) ); ?>" class="button button-primary">Run Full Diagnostics</a>
         <a href="<?php echo esc_url( wp_nonce_url( add_query_arg( 'wcpg_action', 'test_api', $base_url ), 'wcpg_admin_action' ) ); ?>" class="button">Test API</a>
+        <a href="<?php echo esc_url( wp_nonce_url( add_query_arg( 'wcpg_action', 'test_inbound', $base_url ), 'wcpg_admin_action' ) ); ?>" class="button" style="background: #f0f6fc; border-color: #2271b1;">🌐 Test External Access</a>
         <a href="<?php echo esc_url( wp_nonce_url( add_query_arg( 'wcpg_action', 'report_health', $base_url ), 'wcpg_admin_action' ) ); ?>" class="button">Send Health Report</a>
     </div>
 
@@ -977,6 +1154,36 @@ function wcpg_render_diagnostics_content( $base_url = null ) {
 
                 <?php if ( ! empty( $api_test['time'] ) ) : ?>
                     <br><small style="color: #666;">Last tested: <?php echo esc_html( $api_test['time'] ); ?></small>
+                <?php endif; ?>
+            </td>
+        </tr>
+
+        <!-- External Access Test -->
+        <tr>
+            <th scope="row" style="padding: 12px 0;">External Access</th>
+            <td style="padding: 12px 0;">
+                <?php if ( $inbound_test['success'] === true ) : ?>
+                    <span style="color: #00a32a; font-weight: 600;">✓ Accessible</span>
+                    <?php if ( ! empty( $inbound_test['response_time_ms'] ) ) : ?>
+                        <span style="color: #666; margin-left: 10px;">(<?php echo esc_html( $inbound_test['response_time_ms'] ); ?>ms)</span>
+                    <?php endif; ?>
+                    <br><small style="color: #00a32a;"><?php echo esc_html( $inbound_test['message'] ); ?></small>
+                <?php elseif ( $inbound_test['success'] === false ) : ?>
+                    <span style="color: #dc3232; font-weight: 600;">✗ Blocked</span>
+                    <?php if ( ! empty( $inbound_test['http_status'] ) ) : ?>
+                        <span style="color: #666; margin-left: 10px;">(HTTP <?php echo esc_html( $inbound_test['http_status'] ); ?>)</span>
+                    <?php endif; ?>
+                    <br><small style="color: #dc3232;"><?php echo esc_html( $inbound_test['message'] ); ?></small>
+                    <?php if ( ! empty( $inbound_test['details'] ) ) : ?>
+                        <br><small style="color: #666;"><strong>Fix:</strong> <?php echo esc_html( $inbound_test['details'] ); ?></small>
+                    <?php endif; ?>
+                <?php else : ?>
+                    <span style="color: #dba617; font-weight: 600;">? Not tested</span>
+                    <br><small style="color: #666;">Click "🌐 Test External Access" to verify payment processor can reach your site</small>
+                <?php endif; ?>
+
+                <?php if ( ! empty( $inbound_test['time'] ) ) : ?>
+                    <br><small style="color: #666;">Last tested: <?php echo esc_html( $inbound_test['time'] ); ?></small>
                 <?php endif; ?>
             </td>
         </tr>

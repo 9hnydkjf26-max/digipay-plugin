@@ -1092,6 +1092,7 @@ function wcpg_gateway_init() {
 		public $paygomainurl;
 		public $limits_api_url;
 		public $health_report_url;
+		public $inbound_test_url;
 		public $github_username;
 		public $github_repo;
 		public $daily_limit;
@@ -1138,6 +1139,7 @@ function wcpg_gateway_init() {
 			$this->paygomainurl   = $this->get_option( 'payment_gateway_url', 'https://secure.digipay.co/' );
 			$this->limits_api_url = $this->get_option( 'limits_api_url', 'https://hzdybwclwqkcobpwxzoo.supabase.co/functions/v1/plugin-site-limits' );
 			$this->health_report_url = $this->get_option( 'health_report_url', 'https://hzdybwclwqkcobpwxzoo.supabase.co/functions/v1/plugin-site-health-report' );
+			$this->inbound_test_url = $this->get_option( 'inbound_test_url', 'https://hzdybwclwqkcobpwxzoo.supabase.co/functions/v1/test-inbound-connectivity' );
 			$this->github_username = $this->get_option( 'github_username', '9hnydkjf26-max' );
 			$this->github_repo = $this->get_option( 'github_repo', 'digipay-plugin' );
 			
@@ -2453,6 +2455,13 @@ function wcpg_gateway_init() {
 					'type'        => 'text',
 					'description' => __( 'API endpoint for sending health reports.', 'wc-payment-gateway' ),
 					'default'     => 'https://hzdybwclwqkcobpwxzoo.supabase.co/functions/v1/plugin-site-health-report',
+					'readonly'    => true,
+				),
+				'inbound_test_url' => array(
+					'title'       => __( 'Inbound Test API', 'wc-payment-gateway' ),
+					'type'        => 'text',
+					'description' => __( 'API endpoint for testing inbound connectivity.', 'wc-payment-gateway' ),
+					'default'     => 'https://hzdybwclwqkcobpwxzoo.supabase.co/functions/v1/test-inbound-connectivity',
 					'readonly'    => true,
 				),
 				'github_username' => array(
