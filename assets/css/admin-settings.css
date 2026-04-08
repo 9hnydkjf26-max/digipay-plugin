@@ -257,3 +257,129 @@
 .wcpg-collapse-icon.wcpg-collapsed {
 	transform: rotate(-90deg);
 }
+
+/* Diagnose My Site — Issue Cards */
+.wcpg-issue-card {
+	border: 1px solid #c3c4c7;
+	border-left-width: 4px;
+	border-radius: 3px;
+	padding: 12px 16px;
+	margin: 10px 0;
+	background: #fff;
+}
+
+.wcpg-issue-badge {
+	display: inline-block;
+	font-family: monospace;
+	font-size: 11px;
+	font-weight: 600;
+	padding: 2px 7px;
+	border-radius: 3px;
+	margin-right: 6px;
+	vertical-align: middle;
+}
+
+/* Severity: info */
+.wcpg-issue-severity-info.wcpg-issue-card {
+	background: #e7f3ff;
+	border-left-color: #2271b1;
+}
+
+.wcpg-issue-severity-info.wcpg-issue-badge {
+	background: #2271b1;
+	color: #fff;
+}
+
+/* Severity: warning */
+.wcpg-issue-severity-warning.wcpg-issue-card {
+	background: #fcf9e8;
+	border-left-color: #996800;
+}
+
+.wcpg-issue-severity-warning.wcpg-issue-badge {
+	background: #996800;
+	color: #fff;
+}
+
+/* Severity: error */
+.wcpg-issue-severity-error.wcpg-issue-card {
+	background: #fef1f1;
+	border-left-color: #b32d2e;
+}
+
+.wcpg-issue-severity-error.wcpg-issue-badge {
+	background: #b32d2e;
+	color: #fff;
+}
+
+/* Severity: critical */
+.wcpg-issue-severity-critical.wcpg-issue-card {
+	background: #fff0f0;
+	border-left-color: #8a1f11;
+	border-left-width: 5px;
+	font-weight: 600;
+}
+
+.wcpg-issue-severity-critical.wcpg-issue-badge {
+	background: #8a1f11;
+	color: #fff;
+}
+
+/* Current Status — Tile Grid */
+.wcpg-status-grid {
+	display: grid;
+	grid-template-columns: repeat(4, 1fr);
+	gap: 16px;
+	margin: 16px 0 24px;
+	max-width: 960px;
+}
+
+@media (max-width: 782px) {
+	.wcpg-status-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+.wcpg-status-tile {
+	background: #fff;
+	border: 1px solid #c3c4c7;
+	border-radius: 4px;
+	padding: 14px 16px 16px;
+	position: relative;
+	overflow: hidden;
+}
+
+.wcpg-status-bar {
+	position: absolute;
+	top: 0; left: 0; right: 0;
+	height: 4px;
+}
+
+.wcpg-status-tile-green  .wcpg-status-bar { background: #00a32a; }
+.wcpg-status-tile-yellow .wcpg-status-bar { background: #dba617; }
+.wcpg-status-tile-red    .wcpg-status-bar { background: #d63638; }
+.wcpg-status-tile-gray   .wcpg-status-bar { background: #a7aaad; }
+
+.wcpg-status-label {
+	font-size: 11px;
+	text-transform: uppercase;
+	color: #646970;
+	margin-top: 6px;
+	letter-spacing: 0.5px;
+}
+
+.wcpg-status-headline {
+	font-size: 18px;
+	font-weight: 600;
+	margin-top: 4px;
+}
+
+.wcpg-status-tile-green  .wcpg-status-headline { color: #00a32a; }
+.wcpg-status-tile-yellow .wcpg-status-headline { color: #996800; }
+.wcpg-status-tile-red    .wcpg-status-headline { color: #b32d2e; }
+.wcpg-status-tile-gray   .wcpg-status-headline { color: #50575e; }
+
+.wcpg-status-detail {
+	font-size: 12px;
+	color: #50575e;
+	margin-top: 4px;
+	line-height: 1.4;
+}

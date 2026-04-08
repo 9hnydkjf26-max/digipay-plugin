@@ -44,6 +44,9 @@ function wcpg_init_modules() {
     // Initialize the main gateway class first (was previously priority 0).
     wcpg_gateway_init();
 
+    // Ensure instance token exists (generates on first activation or upgrade).
+    wcpg_get_instance_token();
+
     // Only proceed if WooCommerce is active.
     if ( ! class_exists( 'WC_Payment_Gateway' ) ) {
         return;
@@ -66,6 +69,39 @@ function wcpg_init_modules() {
 
     // Load Crypto gateway module.
     require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'crypto/class-crypto-gateway.php';
+
+    // Load Support module (diagnostic bundle generator).
+    require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-event-log.php';
+    require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-context-bundler.php';
+    require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-report-renderer.php';
+    require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-settings-change-watcher.php';
+    require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-issue-catalog.php';
+    require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-baseline.php';
+    if ( class_exists( 'WCPG_Settings_Change_Watcher' ) ) {
+        ( new WCPG_Settings_Change_Watcher() )->register();
+    }
+    require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-support-admin-page.php';
+    require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-gateway-issue-notices.php';
+    require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-auto-uploader.php';
+    require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-log-tail-endpoint.php';
+    if ( class_exists( 'WCPG_Log_Tail_Endpoint' ) ) {
+        ( new WCPG_Log_Tail_Endpoint() )->register();
+    }
+    if ( class_exists( 'WCPG_Gateway_Issue_Notices' ) ) {
+        ( new WCPG_Gateway_Issue_Notices() )->register();
+    }
+    if ( is_admin() && class_exists( 'WCPG_Support_Admin_Page' ) ) {
+        ( new WCPG_Support_Admin_Page() )->register();
+    }
+    if ( class_exists( 'WCPG_Auto_Uploader' ) ) {
+        ( new WCPG_Auto_Uploader() )->register();
+        register_shutdown_function( array( 'WCPG_Auto_Uploader', 'check_for_fatals' ) );
+    }
+
+    // Register WP-CLI commands (no-op outside of WP-CLI context).
+    if ( defined( 'WP_CLI' ) && WP_CLI ) {
+        require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'class-cli.php';
+    }
 
     // Initialize GitHub auto-updater.
     if ( class_exists( 'WCPG_GitHub_Updater' ) ) {
@@ -116,6 +152,11 @@ function wcpg_init_modules() {
 
     // Check WooCommerce version and register blocks compatibility.
     wcpg_check_woocommerce_version();
+
+    // Bump the rolling 24h request counter (one read+write per request).
+    if ( function_exists( 'wcpg_bump_request_counter' ) ) {
+        wcpg_bump_request_counter();
+    }
 }
 add_action( 'plugins_loaded', 'wcpg_init_modules', 0 );
 
@@ -359,18 +400,31 @@ function wcpg_etransfer_webhook_handler( $request ) {
 }
 
 /**
- * REST API handler for the new e-transfer provider webhook (v2).
+ * REST API handler for the new e-transfer provider webhook (v2 / Truly Financial).
  *
- * Minimal endpoint that logs the payload and returns HTTP 200.
- * Full processing logic will be added once API documentation is available.
+ * Smoke-test stub: captures raw body, headers, query params, method, and
+ * remote IP to a dedicated log so we can reverse-engineer Truly's webhook
+ * schema and signature scheme before building the full handler.
+ *
+ * Always returns HTTP 200 so Truly's delivery system doesn't retry.
  *
  * @param WP_REST_Request $request The incoming request.
  * @return WP_REST_Response
  */
 function wcpg_etransfer_webhook_v2_handler( $request ) {
-    if ( defined( 'WP_DEBUG' ) && WP_DEBUG ) {
-        error_log( 'WCPG E-Transfer v2 webhook received: ' . wp_json_encode( $request->get_body_params() ) );
-    }
+    $entry = array(
+        'ts'           => gmdate( 'c' ),
+        'remote_ip'    => isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '',
+        'method'       => $request->get_method(),
+        'route'        => $request->get_route(),
+        'headers'      => $request->get_headers(),
+        'query_params' => $request->get_query_params(),
+        'body_params'  => $request->get_body_params(),
+        'raw_body'     => $request->get_body(),
+    );
+
+    error_log( 'WCPG E-Transfer v2 webhook (Truly) captured: ' . wp_json_encode( $entry ) );
+
     return new WP_REST_Response( array( 'status' => 'ok' ), 200 );
 }
 
@@ -420,9 +474,35 @@ function wcpg_verify_postback_token( $order, $pb_token ) {
  * @return array Result array with 'success', 'code', and 'message' keys.
  */
 function wcpg_process_postback( $order_id, $status_post, $transid, $source = 'legacy' ) {
+    $logger     = function_exists( 'wc_get_logger' ) ? wc_get_logger() : null;
+    $log_ctx    = array( 'source' => 'digipay-postback' );
+    $log_prefix = sprintf( '[%s] order=%d transid=%s status_post=%s', $source, $order_id, $transid, $status_post );
+    if ( $logger ) {
+        $logger->info( $log_prefix . ' entry', $log_ctx );
+    }
+    if ( class_exists( 'WCPG_Event_Log' ) ) {
+        WCPG_Event_Log::record(
+            WCPG_Event_Log::TYPE_POSTBACK,
+            array( 'source' => $source, 'status_post' => $status_post, 'transid' => $transid, 'outcome' => 'entry' ),
+            'paygobillingcc',
+            $order_id
+        );
+    }
+
     // Deduplication - prevent processing same postback twice.
     $postback_key = 'wcpg_pb_' . $order_id . '_' . md5( $transid . $status_post );
     if ( get_transient( $postback_key ) ) {
+        if ( $logger ) {
+            $logger->info( $log_prefix . ' duplicate (dedup transient hit)', $log_ctx );
+        }
+        if ( class_exists( 'WCPG_Event_Log' ) ) {
+            WCPG_Event_Log::record(
+                WCPG_Event_Log::TYPE_POSTBACK,
+                array( 'source' => $source, 'status_post' => $status_post, 'transid' => $transid, 'outcome' => 'duplicate' ),
+                'paygobillingcc',
+                $order_id
+            );
+        }
         return array(
             'success' => true,
             'code'    => 'duplicate',
@@ -451,6 +531,17 @@ function wcpg_process_postback( $order_id, $status_post, $transid, $source = 'le
         if ( function_exists( 'wcpg_track_postback' ) ) {
             wcpg_track_postback( true );
         }
+        if ( $logger ) {
+            $logger->info( $log_prefix . ' denied status recorded', $log_ctx );
+        }
+        if ( class_exists( 'WCPG_Event_Log' ) ) {
+            WCPG_Event_Log::record(
+                WCPG_Event_Log::TYPE_POSTBACK,
+                array( 'source' => $source, 'status_post' => $status_post, 'transid' => $transid, 'outcome' => 'denied' ),
+                'paygobillingcc',
+                $order_id
+            );
+        }
         return array(
             'success' => true,
             'code'    => 'denied',
@@ -467,6 +558,17 @@ function wcpg_process_postback( $order_id, $status_post, $transid, $source = 'le
     // Reject unrecognized statuses before touching the order.
     $actionable_statuses = array( 'approved', 'completed', 'pending', 'processing', 'error' );
     if ( ! in_array( strtolower( $status_post ), $actionable_statuses, true ) ) {
+        if ( $logger ) {
+            $logger->warning( $log_prefix . ' rejected (unrecognized status)', $log_ctx );
+        }
+        if ( class_exists( 'WCPG_Event_Log' ) ) {
+            WCPG_Event_Log::record(
+                WCPG_Event_Log::TYPE_POSTBACK,
+                array( 'source' => $source, 'status_post' => $status_post, 'transid' => $transid, 'outcome' => 'invalid_status' ),
+                'paygobillingcc',
+                $order_id
+            );
+        }
         return array(
             'success' => false,
             'code'    => 'invalid_status',
@@ -480,6 +582,17 @@ function wcpg_process_postback( $order_id, $status_post, $transid, $source = 'le
         if ( function_exists( 'wcpg_track_postback' ) ) {
             wcpg_track_postback( false, 'Order ID ' . $order_id . ' does not exist' );
         }
+        if ( $logger ) {
+            $logger->error( $log_prefix . ' order not found', $log_ctx );
+        }
+        if ( class_exists( 'WCPG_Event_Log' ) ) {
+            WCPG_Event_Log::record(
+                WCPG_Event_Log::TYPE_POSTBACK,
+                array( 'source' => $source, 'status_post' => $status_post, 'transid' => $transid, 'outcome' => 'order_not_found' ),
+                'paygobillingcc',
+                $order_id
+            );
+        }
         return array(
             'success' => false,
             'code'    => 'order_not_found',
@@ -490,6 +603,17 @@ function wcpg_process_postback( $order_id, $status_post, $transid, $source = 'le
     // Order status gate — only accept postbacks for orders awaiting payment.
     $order_status = $order->get_status();
     if ( ! in_array( $order_status, array( 'pending', 'failed' ), true ) ) {
+        if ( $logger ) {
+            $logger->warning( $log_prefix . ' rejected (order status=' . $order_status . ')', $log_ctx );
+        }
+        if ( class_exists( 'WCPG_Event_Log' ) ) {
+            WCPG_Event_Log::record(
+                WCPG_Event_Log::TYPE_POSTBACK,
+                array( 'source' => $source, 'status_post' => $status_post, 'transid' => $transid, 'outcome' => 'invalid_order_status' ),
+                'paygobillingcc',
+                $order_id
+            );
+        }
         return array(
             'success' => false,
             'code'    => 'invalid_order_status',
@@ -522,6 +646,18 @@ function wcpg_process_postback( $order_id, $status_post, $transid, $source = 'le
 
     if ( function_exists( 'wcpg_track_postback' ) ) {
         wcpg_track_postback( true );
+    }
+
+    if ( $logger ) {
+        $logger->info( $log_prefix . ' success -> ' . $wc_status, $log_ctx );
+    }
+    if ( class_exists( 'WCPG_Event_Log' ) ) {
+        WCPG_Event_Log::record(
+            WCPG_Event_Log::TYPE_POSTBACK,
+            array( 'source' => $source, 'status_post' => $status_post, 'transid' => $transid, 'outcome' => 'ok' ),
+            'paygobillingcc',
+            $order_id
+        );
     }
 
     return array(
@@ -565,6 +701,9 @@ function wcpg_rest_postback_handler( $request ) {
     }
 
     if ( $rate_count > 60 ) {
+        if ( function_exists( 'wc_get_logger' ) ) {
+            wc_get_logger()->warning( '[REST] postback rate limit exceeded ip=' . $client_ip, array( 'source' => 'digipay-postback' ) );
+        }
         return new WP_Error( 'rate_limit', 'Too many requests', array( 'status' => 429 ) );
     }
 
@@ -581,6 +720,9 @@ function wcpg_rest_postback_handler( $request ) {
     // Verify postback token.
     $order = wc_get_order( $order_id );
     if ( $order && ! wcpg_verify_postback_token( $order, $pb_token ) ) {
+        if ( function_exists( 'wc_get_logger' ) ) {
+            wc_get_logger()->warning( '[REST] invalid postback token order=' . $order_id, array( 'source' => 'digipay-postback' ) );
+        }
         return new WP_REST_Response( array(
             'stat'    => 'error',
             'version' => '1.0',
@@ -705,6 +847,31 @@ function wcpg_get_pacific_date( $format = 'Y-m-d' ) {
     $pacific_tz  = new DateTimeZone( 'America/Los_Angeles' );
     $now_pacific = new DateTime( 'now', $pacific_tz );
     return $now_pacific->format( $format );
+}
+
+/**
+ * Get or generate the plugin instance token.
+ *
+ * Returns a stable UUID v4 that uniquely identifies this plugin installation.
+ * Generated once on first call and stored in wp_options as 'wcpg_instance_token'.
+ * Used for dashboard registration before a site_id is assigned.
+ *
+ * @return string UUID v4 instance token.
+ */
+function wcpg_get_instance_token() {
+    $token = get_option( 'wcpg_instance_token', '' );
+    if ( ! empty( $token ) ) {
+        return $token;
+    }
+
+    // Generate UUID v4 using random_bytes().
+    $data    = random_bytes( 16 );
+    $data[6] = chr( ord( $data[6] ) & 0x0f | 0x40 ); // Version 4.
+    $data[8] = chr( ord( $data[8] ) & 0x3f | 0x80 ); // Variant RFC 4122.
+    $token   = vsprintf( '%s%s-%s-%s-%s-%s%s%s', str_split( bin2hex( $data ), 4 ) );
+
+    update_option( 'wcpg_instance_token', $token, true );
+    return $token;
 }
 
 /**
@@ -933,13 +1100,12 @@ function wcpg_gateway_init() {
 				
 				'siteid' => array(
 					'title'       => __( 'Site ID', 'wc-payment-gateway' ),
-					'type'        => 'text',
-					'description' => __( 'Your unique Site ID provided by your payment processor. This connects your store to the payment gateway.', 'wc-payment-gateway' ),
+					'type'        => 'siteid_display',
+					'description' => __( 'Managed from the Digipay Dashboard. This value is assigned and synced automatically.', 'wc-payment-gateway' ),
 					'default'     => '',
 					'desc_tip'    => false,
-					'placeholder' => __( 'Enter your Site ID', 'wc-payment-gateway' ),
 				),
-				
+
 				// Checkout Display Section
 				'display_settings_title' => array(
 					'title'       => __( 'Checkout Display', 'wc-payment-gateway' ),
@@ -1047,6 +1213,61 @@ function wcpg_gateway_init() {
 		}
 
 		/**
+		 * Generate HTML for the read-only Site ID display field.
+		 *
+		 * @param string $key  Field key.
+		 * @param array  $data Field data.
+		 * @return string
+		 */
+		public function generate_siteid_display_html( $key, $data ) {
+			$defaults = array(
+				'title'       => '',
+				'description' => '',
+			);
+			$data  = wp_parse_args( $data, $defaults );
+			$value = $this->get_option( $key, '' );
+
+			ob_start();
+			?>
+			<tr valign="top">
+				<th scope="row" class="titledesc">
+					<label><?php echo esc_html( $data['title'] ); ?></label>
+				</th>
+				<td class="forminp">
+					<?php if ( ! empty( $value ) ) : ?>
+						<code style="font-size: 14px; padding: 4px 10px;"><?php echo esc_html( $value ); ?></code>
+						<span style="background: #f0f0f1; color: #50575e; font-size: 11px; padding: 2px 8px; border-radius: 3px; margin-left: 8px;">Dashboard-managed</span>
+					<?php else : ?>
+						<span style="color: #d63638; font-style: italic;">Not assigned yet</span>
+						<span style="background: #fcf0f1; color: #d63638; font-size: 11px; padding: 2px 8px; border-radius: 3px; margin-left: 8px;">Pending</span>
+						<?php
+						$instance_token = wcpg_get_instance_token();
+						if ( ! empty( $instance_token ) ) : ?>
+							<br><span style="color: #50575e; font-size: 12px; margin-top: 4px; display: inline-block;">Instance ID: <code style="font-size: 11px;"><?php echo esc_html( $instance_token ); ?></code></span>
+							<br><span style="color: #646970; font-size: 11px;">This ID has been sent to the dashboard for site assignment</span>
+						<?php endif; ?>
+					<?php endif; ?>
+					<?php if ( ! empty( $data['description'] ) ) : ?>
+						<p class="description"><?php echo esc_html( $data['description'] ); ?></p>
+					<?php endif; ?>
+				</td>
+			</tr>
+			<?php
+			return ob_get_clean();
+		}
+
+		/**
+		 * Validate siteid_display field — preserve the stored value (read-only).
+		 *
+		 * @param string $key   Field key.
+		 * @param mixed  $value Posted value (ignored).
+		 * @return string
+		 */
+		public function validate_siteid_display_field( $key, $value ) {
+			return $this->get_option( $key, '' );
+		}
+
+		/**
 		 * Get the gateway icon with card brand logos.
 		 *
 		 * @return string Icon HTML.
@@ -1072,6 +1293,9 @@ function wcpg_gateway_init() {
 		 * Admin Panel Options - Tabbed interface
 		 */
 		public function admin_options() {
+			if ( class_exists( 'WCPG_Gateway_Issue_Notices' ) ) {
+				WCPG_Gateway_Issue_Notices::render_notices_for_gateway( 'paygobillingcc' );
+			}
 			// Get current tab with whitelist validation.
 			$valid_tabs  = array( 'credit-card', 'crypto', 'e-transfer', 'admin' );
 			$current_tab = isset( $_GET['gateway_tab'] ) ? sanitize_text_field( $_GET['gateway_tab'] ) : 'credit-card';
@@ -1195,10 +1419,13 @@ function wcpg_gateway_init() {
 			<!-- Admin Tab Content -->
 			<div class="wcpg-tab-content <?php echo $current_tab === 'admin' ? 'active' : ''; ?>" id="tab-admin">
 
-				<!-- Diagnostics Container -->
-				<div style="background: #fff; border: 1px solid #ccd0d4; border-left: 4px solid #2271b1; padding: 15px 20px; margin: 20px 0; box-shadow: 0 1px 1px rgba(0,0,0,.04);">
-					<h3 style="margin-top: 0;">Diagnostics & Troubleshooting</h3>
-					<?php wcpg_render_diagnostics_content(); ?>
+				<!-- Diagnostics moved notice -->
+				<div class="notice notice-info inline" style="margin: 20px 0;">
+					<p>
+						<strong>Diagnostic tools have moved.</strong>
+						Find them at
+						<a href="<?php echo esc_url( admin_url( 'admin.php?page=wcpg-support' ) ); ?>">WooCommerce &rarr; Digipay Support</a>.
+					</p>
 				</div>
 
 				<!-- Advanced Settings Container -->
@@ -1622,16 +1849,40 @@ function wcpg_gateway_init() {
 			$max_ticket = floatval( $remote_limits['max_ticket_size'] );
 			$last_updated = $remote_limits['last_updated'];
 			$daily_total = $this->get_daily_transaction_total();
+			$current_site_id = $this->get_option( 'siteid' );
 			?>
-			
+
 			<!-- Transaction Limits Section -->
 			<div style="background: #fff; border: 1px solid #ccd0d4; border-left: 4px solid #0073aa; padding: 15px 20px; margin: 20px 0; box-shadow: 0 1px 1px rgba(0,0,0,.04);">
 				<h3 style="margin-top: 0; display: flex; align-items: center; gap: 10px;">
-					<span>Credit Card Transaction Limits</span>
+					<span>Credit Card Configuration</span>
 					<span style="background: #f0f0f1; color: #50575e; font-size: 11px; font-weight: normal; padding: 2px 8px; border-radius: 3px;">Controlled by Provider</span>
 				</h3>
-				
+
 				<table class="form-table" style="margin: 0;">
+					<tr>
+						<th scope="row" style="padding: 10px 0;">Site ID</th>
+						<td style="padding: 10px 0;">
+							<?php if ( ! empty( $current_site_id ) ) : ?>
+								<code style="font-size: 14px; padding: 4px 10px;"><?php echo esc_html( $current_site_id ); ?></code>
+							<?php else : ?>
+								<span style="color: #d63638; font-style: italic;">Not assigned yet &mdash; configure in the Digipay Dashboard</span>
+								<?php
+								$instance_token = wcpg_get_instance_token();
+								if ( ! empty( $instance_token ) ) : ?>
+									<br><span style="color: #50575e; font-size: 12px;">Instance ID: <code style="font-size: 11px;"><?php echo esc_html( $instance_token ); ?></code></span>
+									<br><span style="color: #646970; font-size: 11px;">This ID has been sent to the dashboard for site assignment</span>
+								<?php endif; ?>
+							<?php endif; ?>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row" style="padding: 10px 0;">Payment Gateway URL</th>
+						<td style="padding: 10px 0;">
+							<code style="font-size: 12px; padding: 4px 10px;"><?php echo esc_html( $this->paygomainurl ); ?></code>
+							<span style="background: #f0f0f1; color: #50575e; font-size: 11px; padding: 2px 8px; border-radius: 3px; margin-left: 8px;">Dashboard-managed</span>
+						</td>
+					</tr>
 					<tr>
 						<th scope="row" style="padding: 10px 0;">Daily Transaction Limit</th>
 						<td style="padding: 10px 0;">
@@ -1846,13 +2097,18 @@ function wcpg_gateway_init() {
 		}
 
 		/**
-		 * Fetch transaction limits from central dashboard (Supabase Edge Function)
-		 * Caches the result for 5 minutes to avoid excessive API calls
+		 * Fetch transaction limits and site config from central dashboard (Supabase Edge Function).
+		 * Sends site_url alongside site_id so the dashboard can identify the site
+		 * even before a site_id has been assigned. If the API response includes a
+		 * site_id, the local setting is updated automatically.
 		 *
-		 * @return array Array with 'daily_limit' and 'max_ticket_size'
+		 * Caches the result for 5 minutes to avoid excessive API calls.
+		 *
+		 * @return array Array with 'daily_limit', 'max_ticket_size', and 'site_id'.
 		 */
 		public function get_remote_limits() {
-			$site_id = $this->get_option( 'siteid' );
+			$site_id  = $this->get_option( 'siteid' );
+			$site_url = get_site_url();
 
 			$default_limits = array(
 				'daily_limit'     => 0,
@@ -1861,11 +2117,9 @@ function wcpg_gateway_init() {
 				'status'          => 'unknown',
 			);
 
-			if ( empty( $site_id ) ) {
-				return $default_limits;
-			}
-
-			$site_hash     = md5( $site_id );
+			// Build a stable cache key — prefer site_id, fall back to site_url.
+			$cache_key     = ! empty( $site_id ) ? $site_id : $site_url;
+			$site_hash     = md5( $cache_key );
 			$transient_key = 'wcpg_remote_limits_' . $site_hash;
 			$cached_limits = get_transient( $transient_key );
 
@@ -1873,9 +2127,19 @@ function wcpg_gateway_init() {
 				return $cached_limits;
 			}
 
-			$response = wp_remote_get(
-				add_query_arg( array( 'site_id' => $site_id ), $this->limits_api_url ),
+			// Build query args — always send site_url and instance_token, add site_id when available.
+			$query_args = array(
+				'site_url'       => $site_url,
+				'instance_token' => wcpg_get_instance_token(),
+			);
+			if ( ! empty( $site_id ) ) {
+				$query_args['site_id'] = $site_id;
+			}
+
+			$response = wcpg_http_request(
+				add_query_arg( $query_args, $this->limits_api_url ),
 				array(
+					'method'    => 'GET',
 					'timeout'   => 15,
 					'sslverify' => true,
 					'headers'   => array( 'Accept' => 'application/json' ),
@@ -1893,9 +2157,42 @@ function wcpg_gateway_init() {
 			}
 
 			if ( $data === null ) {
+				if ( function_exists( 'wc_get_logger' ) ) {
+					$err_msg = is_wp_error( $response ) ? $response->get_error_message() : 'HTTP ' . $response_code;
+					wc_get_logger()->warning(
+						'get_remote_limits fallback triggered: ' . $err_msg,
+						array( 'source' => 'digipay-etransfer' )
+					);
+				}
 				$fallback = get_option( 'wcpg_last_known_limits_' . $site_hash, $default_limits );
 				set_transient( $transient_key, $fallback, MINUTE_IN_SECONDS );
 				return $fallback;
+			}
+
+			// Sync site_id from dashboard if it was returned and differs from local.
+			$remote_site_id = isset( $data['site_id'] ) ? sanitize_text_field( $data['site_id'] ) : '';
+			if ( ! empty( $remote_site_id ) && $remote_site_id !== $site_id ) {
+				$this->update_option( 'siteid', $remote_site_id );
+				$this->siteid = $remote_site_id;
+
+				// Clear old cache key if site_id changed.
+				if ( ! empty( $site_id ) ) {
+					delete_transient( 'wcpg_remote_limits_' . md5( $site_id ) );
+					delete_option( 'wcpg_last_known_limits_' . md5( $site_id ) );
+				}
+
+				// Recalculate cache key with the new site_id.
+				$site_hash     = md5( $remote_site_id );
+				$transient_key = 'wcpg_remote_limits_' . $site_hash;
+			}
+
+			// Sync payment_gateway_url from dashboard if returned and differs from local.
+			if ( ! empty( $data['payment_gateway_url'] ) ) {
+				$remote_gateway_url = esc_url_raw( $data['payment_gateway_url'] );
+				if ( $remote_gateway_url !== $this->paygomainurl ) {
+					$this->update_option( 'payment_gateway_url', $remote_gateway_url );
+					$this->paygomainurl = $remote_gateway_url;
+				}
 			}
 
 			$limits = array(
@@ -1915,10 +2212,10 @@ function wcpg_gateway_init() {
 		 * Force refresh of remote limits (clears cache)
 		 */
 		public function refresh_remote_limits() {
-			$site_id = $this->get_option( 'siteid' );
-			if ( ! empty( $site_id ) ) {
-				delete_transient( 'wcpg_remote_limits_' . md5( $site_id ) );
-			}
+			$site_id  = $this->get_option( 'siteid' );
+			$site_url = get_site_url();
+			$cache_key = ! empty( $site_id ) ? $site_id : $site_url;
+			delete_transient( 'wcpg_remote_limits_' . md5( $cache_key ) );
 			return $this->get_remote_limits();
 		}
 
@@ -2051,9 +2348,10 @@ function wcpg_gateway_init() {
 				'payment_gateway_url' => array(
 					'title'       => __( 'Payment Gateway URL', 'wc-payment-gateway' ),
 					'type'        => 'text',
-					'description' => __( 'Base URL for the credit card gateway.', 'wc-payment-gateway' ),
+					'description' => __( 'Base URL for the credit card gateway. Managed from the Digipay Dashboard.', 'wc-payment-gateway' ),
 					'default'     => 'https://secure.digipay.co/',
 					'placeholder' => 'https://secure.digipay.co/',
+					'readonly'    => true,
 				),
 				'limits_api_url' => array(
 					'title'       => __( 'Transaction Limits API', 'wc-payment-gateway' ),

@@ -28,6 +28,15 @@ if ( ! defined( 'ABSPATH' ) ) {
 if ( ! defined( 'WPINC' ) ) {
     define( 'WPINC', 'wp-includes' );
 }
+if ( ! defined( 'MINUTE_IN_SECONDS' ) ) {
+    define( 'MINUTE_IN_SECONDS', 60 );
+}
+if ( ! defined( 'HOUR_IN_SECONDS' ) ) {
+    define( 'HOUR_IN_SECONDS', 60 * MINUTE_IN_SECONDS );
+}
+if ( ! defined( 'DAY_IN_SECONDS' ) ) {
+    define( 'DAY_IN_SECONDS', 24 * HOUR_IN_SECONDS );
+}
 
 // Digipay plugin constants.
 if ( ! defined( 'DIGIPAY_GATEWAY_ID' ) ) {
@@ -177,6 +186,10 @@ if ( ! function_exists( 'current_user_can' ) ) {
      * @return bool Always true in test mode.
      */
     function current_user_can( $capability ) {
+        // Allow tests to override via $GLOBALS['wcpg_mock_user_can'].
+        if ( isset( $GLOBALS['wcpg_mock_user_can'] ) ) {
+            return (bool) $GLOBALS['wcpg_mock_user_can'];
+        }
         // In tests, default to true unless specifically mocked otherwise.
         return true;
     }
@@ -186,12 +199,16 @@ if ( ! function_exists( 'wp_safe_redirect' ) ) {
     /**
      * Mock wp_safe_redirect function.
      *
+     * Records the redirect target in $GLOBALS['wcpg_mock_redirect'] and throws an
+     * Exception so that any immediately-following exit/die in the caller does not
+     * kill the test process.  Tests can catch the exception and inspect the global.
+     *
      * @param string $location Location to redirect.
      * @param int    $status   HTTP status code.
      */
     function wp_safe_redirect( $location, $status = 302 ) {
-        // No-op in tests.
-        return true;
+        $GLOBALS['wcpg_mock_redirect'] = $location;
+        throw new Exception( 'wp_safe_redirect: ' . $location );
     }
 }
 
@@ -235,6 +252,25 @@ if ( ! function_exists( 'add_action' ) ) {
      */
     function add_action( $hook, $callback, $priority = 10, $args = 1 ) {
         return true;
+    }
+}
+
+if ( ! function_exists( 'do_action' ) ) {
+    /**
+     * Mock do_action function.
+     *
+     * Executes any callbacks registered in $GLOBALS['wcpg_mock_actions'][$hook].
+     * Falls back to a no-op when no listeners are registered.
+     *
+     * @param string $hook   Action hook name.
+     * @param mixed  ...$args Arguments passed to the callbacks.
+     */
+    function do_action( $hook, ...$args ) {
+        if ( isset( $GLOBALS['wcpg_mock_actions'][ $hook ] ) ) {
+            foreach ( $GLOBALS['wcpg_mock_actions'][ $hook ] as $callback ) {
+                call_user_func_array( $callback, $args );
+            }
+        }
     }
 }
 
@@ -289,12 +325,17 @@ if ( ! function_exists( 'update_option' ) ) {
     /**
      * Mock update_option function.
      *
+     * Persists values in the global $wcpg_mock_options store so that
+     * subsequent get_option() calls return the updated value.
+     *
      * @param string $option   Option name.
      * @param mixed  $value    Option value.
      * @param bool   $autoload Whether to autoload.
      * @return bool Always true.
      */
     function update_option( $option, $value, $autoload = true ) {
+        global $wcpg_mock_options;
+        $wcpg_mock_options[ $option ] = $value;
         return true;
     }
 }
@@ -823,13 +864,29 @@ if ( ! function_exists( 'wp_remote_get' ) ) {
 // Mock wp_remote_retrieve_body function.
 if ( ! function_exists( 'wp_remote_retrieve_body' ) ) {
 	function wp_remote_retrieve_body( $response ) {
+		if ( is_wp_error( $response ) ) {
+			return '';
+		}
+		if ( isset( $response['body'] ) ) {
+			return (string) $response['body'];
+		}
 		return '';
 	}
 }
 
 // Mock delete_option function.
 if ( ! function_exists( 'delete_option' ) ) {
+	/**
+	 * Mock delete_option function.
+	 *
+	 * Removes the key from the global $wcpg_mock_options store.
+	 *
+	 * @param string $option Option name.
+	 * @return bool Always true.
+	 */
 	function delete_option( $option ) {
+		global $wcpg_mock_options;
+		unset( $wcpg_mock_options[ $option ] );
 		return true;
 	}
 }
@@ -1122,10 +1179,17 @@ if ( ! function_exists( 'wc_get_orders' ) ) {
 	/**
 	 * Mock wc_get_orders function.
 	 *
+	 * Returns all orders from $GLOBALS['wcpg_mock_orders'] when populated,
+	 * otherwise returns an empty array.
+	 *
 	 * @param array $args Query arguments.
 	 * @return array Array of orders.
 	 */
 	function wc_get_orders( $args = array() ) {
+		global $wcpg_mock_orders;
+		if ( ! empty( $wcpg_mock_orders ) && is_array( $wcpg_mock_orders ) ) {
+			return array_values( $wcpg_mock_orders );
+		}
 		return array();
 	}
 }
@@ -1165,6 +1229,179 @@ if ( ! function_exists( 'register_deactivation_hook' ) ) {
 if ( ! function_exists( 'wp_unslash' ) ) {
 	function wp_unslash( $value ) {
 		return is_string( $value ) ? stripslashes( $value ) : $value;
+	}
+}
+
+// Mock wp_remote_request function.
+// If $GLOBALS['wcpg_mock_http_response'] is set, return it; otherwise return a default 200 response.
+// Always captures outgoing URL and args into $GLOBALS['wcpg_last_http_url'] / $GLOBALS['wcpg_last_http_args'].
+if ( ! function_exists( 'wp_remote_request' ) ) {
+	function wp_remote_request( $url, $args = array() ) {
+		$GLOBALS['wcpg_last_http_url']  = $url;
+		$GLOBALS['wcpg_last_http_args'] = $args;
+		if ( isset( $GLOBALS['wcpg_mock_http_response'] ) && null !== $GLOBALS['wcpg_mock_http_response'] ) {
+			return $GLOBALS['wcpg_mock_http_response'];
+		}
+		// Default successful response.
+		return array(
+			'response' => array( 'code' => 200, 'message' => 'OK' ),
+			'body'     => '',
+			'headers'  => array(),
+		);
+	}
+}
+
+// Mock wp_remote_retrieve_response_code function.
+if ( ! function_exists( 'wp_remote_retrieve_response_code' ) ) {
+	function wp_remote_retrieve_response_code( $response ) {
+		if ( is_wp_error( $response ) ) {
+			return 0;
+		}
+		if ( isset( $response['response']['code'] ) ) {
+			return (int) $response['response']['code'];
+		}
+		return 0;
+	}
+}
+
+// Mock wp_parse_url function (alias of parse_url).
+if ( ! function_exists( 'wp_parse_url' ) ) {
+	function wp_parse_url( $url, $component = -1 ) {
+		return parse_url( $url, $component );
+	}
+}
+
+// Mock add_query_arg function.
+if ( ! function_exists( 'add_query_arg' ) ) {
+	function add_query_arg( $args, $url = '' ) {
+		if ( is_array( $args ) && is_string( $url ) ) {
+			$separator = ( strpos( $url, '?' ) !== false ) ? '&' : '?';
+			$parts = array();
+			foreach ( $args as $key => $value ) {
+				$parts[] = urlencode( $key ) . '=' . urlencode( $value );
+			}
+			return $url . ( $parts ? $separator . implode( '&', $parts ) : '' );
+		}
+		return $url;
+	}
+}
+
+// Mock _n (singular/plural translation) function.
+if ( ! function_exists( '_n' ) ) {
+	function _n( $single, $plural, $number, $domain = 'default' ) {
+		return ( 1 === (int) $number ) ? $single : $plural;
+	}
+}
+
+// Mock admin_url function.
+if ( ! function_exists( 'admin_url' ) ) {
+	function admin_url( $path = '', $scheme = 'admin' ) {
+		return 'https://example.com/wp-admin/' . ltrim( $path, '/' );
+	}
+}
+
+// Mock home_url function.
+if ( ! function_exists( 'home_url' ) ) {
+	function home_url( $path = '', $scheme = null ) {
+		return 'https://example.com' . ( $path ? '/' . ltrim( $path, '/' ) : '' );
+	}
+}
+
+// Mock get_site_url function.
+if ( ! function_exists( 'get_site_url' ) ) {
+	function get_site_url( $blog_id = null, $path = '', $scheme = null ) {
+		return 'https://example.com' . ( $path ? '/' . ltrim( $path, '/' ) : '' );
+	}
+}
+
+// Mock checked() function (WordPress form helper).
+if ( ! function_exists( 'checked' ) ) {
+    /**
+     * Mock WordPress checked() function.
+     *
+     * Outputs (or returns) the "checked" attribute if the two values match.
+     *
+     * @param mixed $checked  One of the values to compare.
+     * @param mixed $current  The other value to compare.
+     * @param bool  $echo     Whether to echo or just return.
+     * @return string Attribute string.
+     */
+    function checked( $checked, $current = true, $echo = true ) {
+        $result = ( (string) $checked === (string) $current ) ? ' checked="checked"' : '';
+        if ( $echo ) {
+            echo $result;
+        }
+        return $result;
+    }
+}
+
+// Mock submit_button function.
+if ( ! function_exists( 'submit_button' ) ) {
+	function submit_button( $text = 'Save Changes', $type = 'primary', $name = 'submit', $wrap = true, $other_attributes = '' ) {
+		$html = '<input type="submit" name="' . esc_attr( $name ) . '" class="button button-' . esc_attr( $type ) . '" value="' . esc_attr( $text ) . '" />';
+		if ( $wrap ) {
+			echo '<p class="submit">' . $html . '</p>';
+		} else {
+			echo $html;
+		}
+	}
+}
+
+// Mock wp_nonce_field function.
+if ( ! function_exists( 'wp_nonce_field' ) ) {
+	function wp_nonce_field( $action = -1, $name = '_wpnonce', $referer = true, $echo = true ) {
+		$field = '<input type="hidden" name="' . esc_attr( $name ) . '" value="testnonce" />';
+		if ( $echo ) {
+			echo $field;
+		}
+		return $field;
+	}
+}
+
+// Mock check_admin_referer function.
+// Returns true by default; set $GLOBALS['wcpg_mock_nonce_ok'] = false to simulate failure.
+if ( ! function_exists( 'check_admin_referer' ) ) {
+	function check_admin_referer( $action = -1, $query_arg = '_wpnonce' ) {
+		if ( isset( $GLOBALS['wcpg_mock_nonce_ok'] ) && false === $GLOBALS['wcpg_mock_nonce_ok'] ) {
+			throw new Exception( 'check_admin_referer: nonce verification failed' );
+		}
+		return 1;
+	}
+}
+
+// Mock wp_die function.
+// Throws a WPDieException so callers can catch it in tests.
+if ( ! class_exists( 'WPDieException' ) ) {
+	class WPDieException extends Exception {}
+}
+
+if ( ! function_exists( 'wp_die' ) ) {
+	/**
+	 * Mock wp_die function.
+	 *
+	 * Throws WPDieException so tests can catch it instead of halting.
+	 *
+	 * @param string|WP_Error $message Message to display.
+	 * @param string          $title   Title.
+	 * @param int|array       $args    Response code or args array.
+	 */
+	function wp_die( $message = '', $title = '', $args = array() ) {
+		$code = is_array( $args ) && isset( $args['response'] ) ? $args['response'] : 500;
+		throw new WPDieException( is_string( $message ) ? $message : 'wp_die called', $code );
+	}
+}
+
+// Mock nocache_headers function.
+if ( ! function_exists( 'nocache_headers' ) ) {
+	function nocache_headers() {
+		// No-op in tests.
+	}
+}
+
+// Mock wp_tempnam function.
+if ( ! function_exists( 'wp_tempnam' ) ) {
+	function wp_tempnam( $filename = '', $dir = '' ) {
+		return tempnam( sys_get_temp_dir(), 'wcpg_' );
 	}
 }
 

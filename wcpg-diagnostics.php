@@ -209,9 +209,14 @@ function wcpg_check_connectivity() {
     
     // Test with a simple request
     $start_time = microtime( true );
-    $response = wp_remote_get( 
-        add_query_arg( array( 'site_id' => $site_id ? $site_id : 'test' ), $api_url ),
+    $query_args = array( 'site_url' => get_site_url() );
+    if ( ! empty( $site_id ) ) {
+        $query_args['site_id'] = $site_id;
+    }
+    $response = wcpg_http_request(
+        add_query_arg( $query_args, $api_url ),
         array(
+            'method' => 'GET',
             'timeout' => 15,
             'sslverify' => true,
             'headers' => array( 'Accept' => 'application/json' )
@@ -358,23 +363,31 @@ function wcpg_test_api_connection() {
         'response_data' => null
     );
     
-    if ( empty( $site_id ) ) {
+    $site_url = get_site_url();
+
+    if ( empty( $site_id ) && empty( $site_url ) ) {
         $result['message'] = 'Site ID not configured';
         return $result;
     }
-    
+
     $api_url = $gateway->limits_api_url;
     $start_time = microtime( true );
-    
-    $response = wp_remote_get( 
-        add_query_arg( array( 'site_id' => $site_id ), $api_url ),
+
+    $query_args = array( 'site_url' => $site_url );
+    if ( ! empty( $site_id ) ) {
+        $query_args['site_id'] = $site_id;
+    }
+
+    $response = wcpg_http_request(
+        add_query_arg( $query_args, $api_url ),
         array(
+            'method' => 'GET',
             'timeout' => 15,
             'sslverify' => true,
             'headers' => array( 'Accept' => 'application/json' )
         )
     );
-    
+
     $end_time = microtime( true );
     $result['response_time_ms'] = round( ( $end_time - $start_time ) * 1000 );
     
@@ -445,9 +458,10 @@ function wcpg_test_postback_url() {
     
     // POST with a dummy session ID — the REST route only accepts POST.
     // An invalid session triggers the "order does not exist" response we check for.
-    $response = wp_remote_post(
+    $response = wcpg_http_request(
         $postback_url,
         array(
+            'method' => 'POST',
             'timeout' => 15,
             'sslverify' => true,
             'user-agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -556,11 +570,16 @@ function wcpg_test_postback_url() {
         return $result;
     }
     
-    // Check for the expected response when no valid order is provided
-    // The postback should return: "Sorry, the order does not exist or is invalid."
-    // Check for key phrases that indicate the postback is working
+    // Check for the expected response when no valid order is provided.
+    // The REST handler may return any of:
+    //   - "Order not found" (current REST handler)
+    //   - stat:"order_not_found" (JSON code field)
+    //   - "order does not exist" / "order is invalid" (legacy PHP handler)
+    //   - "Sorry, the order does not exist or is invalid" (legacy template)
     $body_lower = strtolower( $body );
-    if ( strpos( $body_lower, 'order does not exist' ) !== false || 
+    if ( strpos( $body_lower, 'order not found' ) !== false ||
+         strpos( $body, 'order_not_found' ) !== false ||
+         strpos( $body_lower, 'order does not exist' ) !== false ||
          strpos( $body_lower, 'order is invalid' ) !== false ||
          strpos( $body, 'Sorry, the order does not exist or is invalid' ) !== false ) {
         $result['success'] = true;
@@ -613,7 +632,7 @@ function wcpg_test_postback_url() {
     $preview = preg_replace( '/\s+/', ' ', $preview ); // Normalize whitespace
     $preview = trim( $preview );
     
-    $result['message'] = 'Postback URL returned unexpected response. Expected "order does not exist" message.';
+    $result['message'] = 'Postback URL returned unexpected response. Expected an "order not found" / "order_not_found" message.';
     
     update_option( 'wcpg_postback_url_test', array(
         'time' => current_time( 'mysql' ),
@@ -637,8 +656,10 @@ function wcpg_test_postback_url() {
 function wcpg_report_health() {
     $gateway = new WC_Gateway_Paygo_npaygo();
     $site_id = $gateway->get_option( 'siteid' );
-    
-    if ( empty( $site_id ) ) {
+    $site_url = get_site_url();
+
+    // Allow health reports even without site_id — the dashboard can identify the site by URL.
+    if ( empty( $site_id ) && empty( $site_url ) ) {
         return false;
     }
     
@@ -674,6 +695,7 @@ function wcpg_report_health() {
     // Build health report
     $health_data = array(
         'site_id' => $site_id,
+        'instance_token' => wcpg_get_instance_token(),
         'site_name' => get_bloginfo( 'name' ),
         'site_url' => get_site_url(),
         
@@ -714,16 +736,31 @@ function wcpg_report_health() {
     
     // Send to central dashboard - use configurable URL
     $health_report_url = $gateway->health_report_url;
-    $response = wp_remote_post(
+    $response = wcpg_http_request(
         $health_report_url,
         array(
+            'method' => 'POST',
             'timeout' => 10,
             'headers' => array( 'Content-Type' => 'application/json' ),
             'body' => json_encode( $health_data )
         )
     );
-    
-    return ! is_wp_error( $response );
+
+    if ( is_wp_error( $response ) ) {
+        return false;
+    }
+
+    // Check if the dashboard returned an assigned site_id for this instance.
+    $response_code = wp_remote_retrieve_response_code( $response );
+    if ( $response_code === 200 ) {
+        $body = json_decode( wp_remote_retrieve_body( $response ), true );
+        if ( ! empty( $body['site_id'] ) && empty( $site_id ) ) {
+            $remote_site_id = sanitize_text_field( $body['site_id'] );
+            $gateway->update_option( 'siteid', $remote_site_id );
+        }
+    }
+
+    return true;
 }
 
 // ============================================================
@@ -775,9 +812,10 @@ function wcpg_test_inbound_connectivity() {
     
     $start_time = microtime( true );
     
-    $response = wp_remote_post( 
+    $response = wcpg_http_request(
         $test_url,
         array(
+            'method' => 'POST',
             'timeout' => 30, // Allow more time since this involves two network hops
             'headers' => array( 'Content-Type' => 'application/json' ),
             'body' => json_encode( array(
@@ -869,15 +907,17 @@ function wcpg_get_inbound_test_result() {
  * This function outputs the diagnostics UI without the <details> collapsible wrapper,
  * suitable for embedding directly in the Admin tab.
  */
-function wcpg_render_diagnostics_content() {
+function wcpg_render_diagnostics_content( $base_url = null ) {
     // SECURITY: Verify user has permission.
     if ( ! current_user_can( 'manage_woocommerce' ) ) {
         echo '<p>' . esc_html__( 'You do not have permission to view diagnostics.', 'wc-payment-gateway' ) . '</p>';
         return;
     }
 
-    // Build base URL for Admin tab.
-    $base_url = admin_url( 'admin.php?page=wc-settings&tab=checkout&section=paygobillingcc&gateway_tab=admin' );
+    // Build base URL — caller can override so the renderer works from any admin page.
+    if ( empty( $base_url ) ) {
+        $base_url = admin_url( 'admin.php?page=wc-settings&tab=checkout&section=paygobillingcc&gateway_tab=admin' );
+    }
 
     // Handle test actions.
     if ( isset( $_GET['wcpg_action'] ) ) {
@@ -910,12 +950,6 @@ function wcpg_render_diagnostics_content() {
                 } else {
                     echo '<div class="notice notice-error"><p><strong>✗ API Connection Failed:</strong> ' . esc_html( $result['message'] ) . '</p></div>';
                 }
-            }
-
-            if ( $action === 'reset_postback_stats' ) {
-                delete_option( 'wcpg_postback_stats' );
-                wcpg_report_health();
-                echo '<div class="notice notice-success"><p>Postback statistics reset.</p></div>';
             }
 
             if ( $action === 'report_health' ) {
@@ -1161,7 +1195,6 @@ function wcpg_render_diagnostics_content() {
                 <br><small style="color: #666;">
                     <span style="color: #00a32a;">✓ <?php echo esc_html( $postback_stats['success_count'] ); ?></span> successful,
                     <span style="color: #dc3232;">✗ <?php echo esc_html( $postback_stats['error_count'] ); ?></span> failed
-                    <a href="<?php echo esc_url( wp_nonce_url( add_query_arg( 'wcpg_action', 'reset_postback_stats', $base_url ), 'wcpg_admin_action' ) ); ?>" style="margin-left: 10px;" onclick="return confirm('Reset postback statistics?');">Reset</a>
                 </small>
 
                 <?php if ( $postback_stats['last_received'] ) : ?>

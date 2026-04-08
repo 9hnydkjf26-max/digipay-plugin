@@ -325,8 +325,18 @@ class WCPG_GitHub_Updater {
             return $reply;
         }
 
+        $log = function ($code, $message) {
+            if (function_exists('wc_get_logger')) {
+                wc_get_logger()->error(
+                    'GitHub updater: ' . $code . ' — ' . $message,
+                    array('source' => 'digipay-etransfer')
+                );
+            }
+        };
+
         // Block zipball URLs — they have no signature.
         if (strpos($package, '/zipball/') !== false) {
+            $log('wcpg_unsigned_zipball', 'Zipball URL rejected (no signature).');
             return new WP_Error(
                 'wcpg_unsigned_zipball',
                 'Update blocked: GitHub zipball downloads are not signed. Upload a signed release asset instead.'
@@ -336,6 +346,7 @@ class WCPG_GitHub_Updater {
         // Get the cached release info for the signature URL.
         $release_info = $this->get_github_release_info();
         if (!$release_info || empty($release_info->signature_url)) {
+            $log('wcpg_no_signature', 'No .sig URL in release info.');
             return new WP_Error(
                 'wcpg_no_signature',
                 'Update blocked: no .sig file found in the GitHub release. Upload the signed .zip.sig alongside the .zip.'
@@ -352,6 +363,7 @@ class WCPG_GitHub_Updater {
         $sig_tmpfile = download_url($release_info->signature_url);
         if (is_wp_error($sig_tmpfile)) {
             @unlink($zip_tmpfile);
+            $log('wcpg_sig_download_failed', $sig_tmpfile->get_error_message());
             return new WP_Error(
                 'wcpg_sig_download_failed',
                 'Update blocked: could not download signature file. ' . $sig_tmpfile->get_error_message()
@@ -365,6 +377,7 @@ class WCPG_GitHub_Updater {
         $signature = base64_decode($sig_b64, true);
         if ($signature === false || strlen($signature) !== SODIUM_CRYPTO_SIGN_BYTES) {
             @unlink($zip_tmpfile);
+            $log('wcpg_sig_invalid', 'Signature not 64 bytes after base64 decode.');
             return new WP_Error(
                 'wcpg_sig_invalid',
                 'Update blocked: signature file is malformed (expected 64-byte Ed25519 signature).'
@@ -378,6 +391,7 @@ class WCPG_GitHub_Updater {
         $public_key = base64_decode(self::SIGNING_PUBLIC_KEY, true);
         if ($public_key === false || strlen($public_key) !== SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES) {
             @unlink($zip_tmpfile);
+            $log('wcpg_key_invalid', 'Hardcoded public key failed base64 decode or wrong size.');
             return new WP_Error(
                 'wcpg_key_invalid',
                 'Update blocked: hardcoded public key is invalid. Contact the plugin developer.'
@@ -389,6 +403,7 @@ class WCPG_GitHub_Updater {
 
         if (!$valid) {
             @unlink($zip_tmpfile);
+            $log('wcpg_sig_mismatch', 'Ed25519 verification returned false.');
             return new WP_Error(
                 'wcpg_sig_mismatch',
                 'Update blocked: signature verification failed. The release ZIP may have been tampered with.'

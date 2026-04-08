@@ -1,0 +1,77 @@
+name: Issue Catalog Check
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  catalog-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify catalog updated when closing a support issue
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          # Does the PR body declare it closes / fixes / resolves an issue?
+          closes_issue=false
+          if printf '%s' "$PR_BODY" | grep -Eiq '(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]*[:#][[:space:]]*#?[0-9]+'; then
+            closes_issue=true
+          fi
+          if printf '%s' "$PR_BODY" | grep -Eiq '(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+'; then
+            closes_issue=true
+          fi
+
+          if [ "$closes_issue" = "false" ]; then
+            echo "PR does not close a support issue — catalog check skipped."
+            exit 0
+          fi
+
+          echo "PR closes a support issue. Verifying catalog artifact…"
+
+          # Files changed in the PR.
+          changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          echo "Changed files:"
+          echo "$changed"
+
+          if echo "$changed" | grep -qE '(^|/)support/class-issue-catalog\.php$'; then
+            echo "✓ class-issue-catalog.php was updated."
+            exit 0
+          fi
+
+          if echo "$changed" | grep -qE '(^|/)tests/IssueCatalogTest\.php$'; then
+            echo "✓ IssueCatalogTest.php was updated."
+            exit 0
+          fi
+
+          # Allow explicit opt-out via PR body line: "no-catalog-entry: <reason>"
+          if printf '%s' "$PR_BODY" | grep -Eiq '^[[:space:]]*no-catalog-entry:[[:space:]]*\S+'; then
+            echo "✓ PR body contains a no-catalog-entry: justification."
+            exit 0
+          fi
+
+          echo
+          echo "✗ This PR closes a support issue but does not:"
+          echo "    - touch secure_plugin/support/class-issue-catalog.php, OR"
+          echo "    - touch secure_plugin/tests/IssueCatalogTest.php, OR"
+          echo "    - include a 'no-catalog-entry: <reason>' line in the PR body."
+          echo
+          echo "See secure_plugin/docs/support-runbook.md §4 for the policy."
+          exit 1
+
+      - name: Run catalog tests
+        run: |
+          if [ -f composer.json ]; then
+            composer install --no-interaction --no-progress --prefer-dist
+            ./vendor/bin/phpunit tests/IssueCatalogTest.php
+          else
+            echo "No composer.json at repo root — skipping phpunit step."
+          fi
