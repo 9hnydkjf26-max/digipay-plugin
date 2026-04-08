@@ -80,6 +80,10 @@ function wcpg_init_modules() {
         ( new WCPG_Settings_Change_Watcher() )->register();
     }
     require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-support-admin-page.php';
+    require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-gateway-issue-notices.php';
+    if ( class_exists( 'WCPG_Gateway_Issue_Notices' ) ) {
+        ( new WCPG_Gateway_Issue_Notices() )->register();
+    }
     if ( is_admin() && class_exists( 'WCPG_Support_Admin_Page' ) ) {
         ( new WCPG_Support_Admin_Page() )->register();
     }
@@ -1274,6 +1278,9 @@ function wcpg_gateway_init() {
 		 * Admin Panel Options - Tabbed interface
 		 */
 		public function admin_options() {
+			if ( class_exists( 'WCPG_Gateway_Issue_Notices' ) ) {
+				WCPG_Gateway_Issue_Notices::render_notices_for_gateway( 'paygobillingcc' );
+			}
 			// Get current tab with whitelist validation.
 			$valid_tabs  = array( 'credit-card', 'crypto', 'e-transfer', 'admin' );
 			$current_tab = isset( $_GET['gateway_tab'] ) ? sanitize_text_field( $_GET['gateway_tab'] ) : 'credit-card';

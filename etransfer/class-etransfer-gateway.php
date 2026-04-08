@@ -117,6 +117,16 @@ class WC_Gateway_ETransfer extends WC_Payment_Gateway {
 	}
 
 	/**
+	 * Admin settings display — delegate to parent and prepend issue notices.
+	 */
+	public function admin_options() {
+		if ( class_exists( 'WCPG_Gateway_Issue_Notices' ) ) {
+			WCPG_Gateway_Issue_Notices::render_notices_for_gateway( 'digipay_etransfer' );
+		}
+		parent::admin_options();
+	}
+
+	/**
 	 * Initialize Gateway Settings Form Fields.
 	 */
 	public function init_form_fields() {

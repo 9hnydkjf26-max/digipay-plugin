@@ -27,6 +27,16 @@ class WCPG_Gateway_Crypto extends WC_Payment_Gateway {
 	}
 
 	/**
+	 * Admin settings display — delegate to parent and prepend issue notices.
+	 */
+	public function admin_options() {
+		if ( class_exists( 'WCPG_Gateway_Issue_Notices' ) ) {
+			WCPG_Gateway_Issue_Notices::render_notices_for_gateway( 'wcpg_crypto' );
+		}
+		parent::admin_options();
+	}
+
+	/**
 	 * Initialize gateway settings form fields.
 	 */
 	public function init_form_fields() {
