@@ -149,7 +149,7 @@ class WCPG_Gateway_Issue_Notices {
 			return;
 		}
 
-		$support_url = esc_url( admin_url( 'admin.php?page=' . WCPG_Support_Admin_Page::MENU_SLUG ) );
+		$support_url = esc_url( admin_url( 'admin.php?page=wcpg-support' ) );
 
 		foreach ( $issues as $issue ) {
 			$id            = isset( $issue['id'] ) ? esc_html( $issue['id'] ) : '';
