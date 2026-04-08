@@ -22,7 +22,7 @@ class IssueCatalogTest extends DigipayTestCase {
 	public function test_all_returns_array_of_issues() {
 		$issues = WCPG_Issue_Catalog::all();
 		$this->assertIsArray( $issues );
-		$this->assertGreaterThanOrEqual( 12, count( $issues ) );
+		$this->assertGreaterThanOrEqual( 11, count( $issues ) );
 	}
 
 	/**
@@ -149,14 +149,16 @@ class IssueCatalogTest extends DigipayTestCase {
 	}
 
 	/**
-	 * WCPG-X-001: using hardcoded fallback encryption key.
+	 * WCPG-X-001 was removed from the catalog: the hardcoded fallback
+	 * encryption key is unavoidable without a wp-config.php edit, and
+	 * surfacing it as a warning was noise. Ensure the detector does not fire.
 	 */
-	public function test_detects_x_001_default_encryption_key() {
+	public function test_x_001_is_not_in_catalog() {
 		$bundle = $this->build_clean_bundle();
 		$bundle['encryption_key_status']['using_default'] = true;
 		$matched = WCPG_Issue_Catalog::detect_all( $bundle );
 		$ids     = array_column( $matched, 'id' );
-		$this->assertContains( 'WCPG-X-001', $ids );
+		$this->assertNotContains( 'WCPG-X-001', $ids );
 	}
 
 	/**
@@ -290,7 +292,7 @@ class IssueCatalogTest extends DigipayTestCase {
 		}
 
 		// Non-config-only issues must NOT appear regardless of bundle state.
-		$non_config_ids = array( 'WCPG-X-001', 'WCPG-X-002', 'WCPG-X-003', 'WCPG-X-004', 'WCPG-P-001', 'WCPG-P-002', 'WCPG-W-001', 'WCPG-X-005', 'WCPG-S-001' );
+		$non_config_ids = array( 'WCPG-X-002', 'WCPG-X-003', 'WCPG-X-004', 'WCPG-P-001', 'WCPG-P-002', 'WCPG-W-001', 'WCPG-X-005', 'WCPG-S-001' );
 		foreach ( $non_config_ids as $nid ) {
 			$this->assertNotContains( $nid, $ids, "Non-config-only issue '{$nid}' should not appear in detect_config_only() output" );
 		}

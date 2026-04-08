@@ -169,28 +169,11 @@ class WCPG_Issue_Catalog {
 				},
 			),
 
-			// ----------------------------------------------------------
-			// WCPG-X-001  Encryption key using hardcoded fallback
-			// ----------------------------------------------------------
-			array(
-				'id'            => 'WCPG-X-001',
-				'title'         => 'Encryption key using hardcoded fallback value',
-				'plain_english' => 'The plugin is using a default, publicly-known encryption key. Any merchant running the plugin without a custom key shares the same fallback.',
-				'fix'           => "Add `define( 'DIGIPAY_ENCRYPTION_KEY', 'your-long-random-string-here' );` to your site's wp-config.php file above the `/* That's all, stop editing! */` line.",
-				'severity'      => self::SEV_WARNING,
-				'config_only'   => false,
-				'detector'      => static function ( array $bundle ) {
-					$key_status = isset( $bundle['encryption_key_status'] )
-						? $bundle['encryption_key_status']
-						: null;
-
-					if ( ! is_array( $key_status ) ) {
-						return false;
-					}
-
-					return isset( $key_status['using_default'] ) && $key_status['using_default'] === true;
-				},
-			),
+			// WCPG-X-001 (encryption key using hardcoded fallback) intentionally
+			// omitted: the fallback is a known default and cannot be changed per-
+			// merchant without a wp-config.php edit we do not ask merchants to do.
+			// Surfacing it as a warning was noise; the info is still in the raw
+			// bundle's encryption_key_status section for support review.
 
 			// ----------------------------------------------------------
 			// WCPG-X-002  LiteSpeed Cache active and REST endpoint NOT excluded
