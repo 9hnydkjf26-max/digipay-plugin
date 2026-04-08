@@ -324,3 +324,62 @@
 	background: #8a1f11;
 	color: #fff;
 }
+
+/* Current Status — Tile Grid */
+.wcpg-status-grid {
+	display: grid;
+	grid-template-columns: repeat(4, 1fr);
+	gap: 16px;
+	margin: 16px 0 24px;
+	max-width: 960px;
+}
+
+@media (max-width: 782px) {
+	.wcpg-status-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+.wcpg-status-tile {
+	background: #fff;
+	border: 1px solid #c3c4c7;
+	border-radius: 4px;
+	padding: 14px 16px 16px;
+	position: relative;
+	overflow: hidden;
+}
+
+.wcpg-status-bar {
+	position: absolute;
+	top: 0; left: 0; right: 0;
+	height: 4px;
+}
+
+.wcpg-status-tile-green  .wcpg-status-bar { background: #00a32a; }
+.wcpg-status-tile-yellow .wcpg-status-bar { background: #dba617; }
+.wcpg-status-tile-red    .wcpg-status-bar { background: #d63638; }
+.wcpg-status-tile-gray   .wcpg-status-bar { background: #a7aaad; }
+
+.wcpg-status-label {
+	font-size: 11px;
+	text-transform: uppercase;
+	color: #646970;
+	margin-top: 6px;
+	letter-spacing: 0.5px;
+}
+
+.wcpg-status-headline {
+	font-size: 18px;
+	font-weight: 600;
+	margin-top: 4px;
+}
+
+.wcpg-status-tile-green  .wcpg-status-headline { color: #00a32a; }
+.wcpg-status-tile-yellow .wcpg-status-headline { color: #996800; }
+.wcpg-status-tile-red    .wcpg-status-headline { color: #b32d2e; }
+.wcpg-status-tile-gray   .wcpg-status-headline { color: #50575e; }
+
+.wcpg-status-detail {
+	font-size: 12px;
+	color: #50575e;
+	margin-top: 4px;
+	line-height: 1.4;
+}

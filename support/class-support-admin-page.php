@@ -86,6 +86,7 @@ class WCPG_Support_Admin_Page {
 		}
 
 		$summary = $this->build_summary();
+		$tiles   = $this->build_status_tiles();
 		?>
 		<div class="wrap">
 			<h1>Digipay Support</h1>
@@ -108,14 +109,17 @@ class WCPG_Support_Admin_Page {
 			<?php $this->render_diagnose_results(); ?>
 
 			<h2>Current Status</h2>
-			<table class="widefat striped" style="max-width:720px;">
-				<tbody>
-					<tr><th>Plugin version</th><td><?php echo esc_html( $summary['plugin_version'] ); ?></td></tr>
-					<tr><th>Postbacks (stored stats)</th><td><?php echo esc_html( $summary['postback_stats'] ); ?></td></tr>
-					<tr><th>E-Transfer webhook (24h)</th><td><?php echo esc_html( $summary['webhook_health'] ); ?></td></tr>
-					<tr><th>Last API connectivity test</th><td><?php echo esc_html( $summary['api_last_test'] ); ?></td></tr>
-				</tbody>
-			</table>
+			<p class="description">Plugin version: <?php echo esc_html( $summary['plugin_version'] ); ?></p>
+			<div class="wcpg-status-grid">
+				<?php foreach ( $tiles as $tile ) : ?>
+				<div class="wcpg-status-tile wcpg-status-tile-<?php echo esc_attr( $tile['status'] ); ?>">
+					<div class="wcpg-status-bar"></div>
+					<div class="wcpg-status-label"><?php echo esc_html( $tile['label'] ); ?></div>
+					<div class="wcpg-status-headline"><?php echo esc_html( $tile['headline'] ); ?></div>
+					<div class="wcpg-status-detail"><?php echo esc_html( $tile['detail'] ); ?></div>
+				</div>
+				<?php endforeach; ?>
+			</div>
 
 			<h2>Run a Diagnostic</h2>
 			<p>
@@ -322,6 +326,239 @@ class WCPG_Support_Admin_Page {
 		$zip->addFromString( 'report.md', (string) $markdown );
 		$zip->close();
 		return $tmp;
+	}
+
+	/**
+	 * Build 4 status tiles for the Current Status grid.
+	 *
+	 * Each tile is an array with keys: key, label, status, headline, detail.
+	 * Status is one of: green, yellow, red, gray.
+	 *
+	 * @return array[]
+	 */
+	protected function build_status_tiles() {
+		return array(
+			$this->build_postbacks_tile(),
+			$this->build_webhook_tile(),
+			$this->build_api_tile(),
+			$this->build_orders_tile(),
+		);
+	}
+
+	/**
+	 * Build the Postbacks status tile.
+	 *
+	 * @return array
+	 */
+	private function build_postbacks_tile() {
+		$pb_stats     = get_option( 'wcpg_postback_stats', array() );
+		$success      = (int) ( isset( $pb_stats['success_count'] ) ? $pb_stats['success_count'] : 0 );
+		$error        = (int) ( isset( $pb_stats['error_count'] ) ? $pb_stats['error_count'] : 0 );
+		$total        = $success + $error;
+
+		if ( 0 === $total ) {
+			return array(
+				'key'      => 'postbacks',
+				'label'    => 'Postbacks',
+				'status'   => 'gray',
+				'headline' => 'Unknown',
+				'detail'   => 'No transactions yet',
+			);
+		}
+
+		$error_rate = $error / $total;
+
+		if ( $error_rate < 0.05 ) {
+			return array(
+				'key'      => 'postbacks',
+				'label'    => 'Postbacks',
+				'status'   => 'green',
+				'headline' => 'Healthy',
+				'detail'   => "{$success}/{$total} successful",
+			);
+		}
+
+		if ( $error_rate <= 0.20 ) {
+			return array(
+				'key'      => 'postbacks',
+				'label'    => 'Postbacks',
+				'status'   => 'yellow',
+				'headline' => 'Degraded',
+				'detail'   => "{$error}/{$total} failed",
+			);
+		}
+
+		return array(
+			'key'      => 'postbacks',
+			'label'    => 'Postbacks',
+			'status'   => 'red',
+			'headline' => 'Failing',
+			'detail'   => "{$error}/{$total} failed — high error rate",
+		);
+	}
+
+	/**
+	 * Build the Webhook status tile.
+	 *
+	 * @return array
+	 */
+	private function build_webhook_tile() {
+		$counters = class_exists( 'WCPG_ETransfer_Webhook_Handler' )
+			? WCPG_ETransfer_Webhook_Handler::get_health_counters()
+			: array();
+
+		$total = array_sum( array_map( 'intval', $counters ) );
+
+		if ( 0 === $total ) {
+			return array(
+				'key'      => 'webhook',
+				'label'    => 'E-Transfer Webhook',
+				'status'   => 'gray',
+				'headline' => 'Unknown',
+				'detail'   => 'No webhook events recorded',
+			);
+		}
+
+		$hmac_fail_count       = (int) ( isset( $counters['hmac_fail'] ) ? $counters['hmac_fail'] : 0 );
+		$timestamp_reject_count = (int) ( isset( $counters['timestamp_reject'] ) ? $counters['timestamp_reject'] : 0 );
+		$fail_count            = $hmac_fail_count + $timestamp_reject_count;
+		$processed             = (int) ( isset( $counters['processed'] ) ? $counters['processed'] : 0 );
+
+		if ( 0 === $fail_count ) {
+			return array(
+				'key'      => 'webhook',
+				'label'    => 'E-Transfer Webhook',
+				'status'   => 'green',
+				'headline' => 'Healthy',
+				'detail'   => "{$processed} processed",
+			);
+		}
+
+		if ( $fail_count <= 5 ) {
+			return array(
+				'key'      => 'webhook',
+				'label'    => 'E-Transfer Webhook',
+				'status'   => 'yellow',
+				'headline' => 'Degraded',
+				'detail'   => "{$fail_count} signature/timestamp failures",
+			);
+		}
+
+		return array(
+			'key'      => 'webhook',
+			'label'    => 'E-Transfer Webhook',
+			'status'   => 'red',
+			'headline' => 'Failing',
+			'detail'   => "{$fail_count} signature/timestamp failures in 24h",
+		);
+	}
+
+	/**
+	 * Build the API status tile.
+	 *
+	 * @return array
+	 */
+	private function build_api_tile() {
+		$api = get_option( 'wcpg_api_last_test', array() );
+
+		if ( ! is_array( $api ) || empty( $api['time'] ) || ! isset( $api['success'] ) ) {
+			return array(
+				'key'      => 'api',
+				'label'    => 'API Connectivity',
+				'status'   => 'gray',
+				'headline' => 'Unknown',
+				'detail'   => 'No API test run yet',
+			);
+		}
+
+		$time = $api['time'];
+
+		if ( true === $api['success'] ) {
+			$ms = isset( $api['response_time_ms'] ) ? (int) $api['response_time_ms'] : 0;
+
+			if ( $ms < 1000 ) {
+				return array(
+					'key'      => 'api',
+					'label'    => 'API Connectivity',
+					'status'   => 'green',
+					'headline' => 'Healthy',
+					'detail'   => "{$ms}ms response, last test {$time}",
+				);
+			}
+
+			return array(
+				'key'      => 'api',
+				'label'    => 'API Connectivity',
+				'status'   => 'yellow',
+				'headline' => 'Slow',
+				'detail'   => "{$ms}ms response (slow), last test {$time}",
+			);
+		}
+
+		return array(
+			'key'      => 'api',
+			'label'    => 'API Connectivity',
+			'status'   => 'red',
+			'headline' => 'Failing',
+			'detail'   => "Last test failed at {$time}",
+		);
+	}
+
+	/**
+	 * Build the Orders status tile.
+	 *
+	 * Counts failed/on-hold/pending orders for the 3 gateway IDs in the last 7 days.
+	 * Falls back to 0 if wc_get_orders is unavailable.
+	 *
+	 * @return array
+	 */
+	private function build_orders_tile() {
+		$count = 0;
+
+		try {
+			if ( function_exists( 'wc_get_orders' ) ) {
+				$orders = wc_get_orders(
+					array(
+						'payment_method' => array( 'paygobillingcc', 'digipay_etransfer', 'wcpg_crypto' ),
+						'status'         => array( 'wc-failed', 'wc-on-hold', 'wc-pending' ),
+						'date_after'     => gmdate( 'Y-m-d', strtotime( '-7 days' ) ),
+						'return'         => 'ids',
+						'limit'          => 100,
+					)
+				);
+				$count = is_array( $orders ) ? count( $orders ) : 0;
+			}
+		} catch ( \Throwable $e ) {
+			$count = 0;
+		}
+
+		if ( 0 === $count ) {
+			return array(
+				'key'      => 'orders',
+				'label'    => 'Recent Orders',
+				'status'   => 'green',
+				'headline' => 'Healthy',
+				'detail'   => 'No stuck orders in the last 7 days',
+			);
+		}
+
+		if ( $count <= 3 ) {
+			return array(
+				'key'      => 'orders',
+				'label'    => 'Recent Orders',
+				'status'   => 'yellow',
+				'headline' => 'Some attention needed',
+				'detail'   => "{$count} stuck orders in the last 7 days",
+			);
+		}
+
+		return array(
+			'key'      => 'orders',
+			'label'    => 'Recent Orders',
+			'status'   => 'red',
+			'headline' => 'Needs attention',
+			'detail'   => "{$count} stuck orders in the last 7 days",
+		);
 	}
 
 	/**
