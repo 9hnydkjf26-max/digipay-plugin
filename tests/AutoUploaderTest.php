@@ -124,7 +124,7 @@ class AutoUploaderTest extends DigipayTestCase {
 		);
 
 		$uploader = new WCPG_Auto_Uploader();
-		$uploader->handle_critical_event( 'hmac_failures', array( 'count' => 10 ) );
+		$uploader->handle_critical_event( 'hmac_threshold', array( 'count' => 10 ) );
 
 		// The wcpg_http_request wrapper calls wp_remote_request.
 		// We verify by checking that the throttle transient was set
@@ -138,7 +138,7 @@ class AutoUploaderTest extends DigipayTestCase {
 		$events = WCPG_Event_Log::recent( 1, WCPG_Event_Log::TYPE_CRITICAL );
 		$this->assertCount( 1, $events, 'One critical event log entry should be recorded' );
 		$this->assertSame( 'auto_upload', $events[0]['data']['action'] );
-		$this->assertSame( 'hmac_failures', $events[0]['data']['reason'] );
+		$this->assertSame( 'hmac_threshold', $events[0]['data']['reason'] );
 		$this->assertTrue( $events[0]['data']['success'] );
 		$this->assertSame( 200, $events[0]['data']['response_code'] );
 
@@ -183,41 +183,48 @@ class AutoUploaderTest extends DigipayTestCase {
 	/**
 	 * Verify the HMAC-SHA512 signature uses format: timestamp . '.' . body.
 	 *
-	 * We capture the last wp_remote_request call by peeking at the global
-	 * store that the mock populates, then reconstruct the expected signature.
+	 * We capture the outgoing wp_remote_request args via the bootstrap mock globals,
+	 * then reconstruct the expected signature from the known secret and captured data.
 	 */
 	public function test_hmac_signature_format() {
+		// 1. Set known site secret.
+		update_option( 'wcpg_support_site_secret', 'test-secret-value' );
+
+		// 2. Opt in and set ingest URL.
 		update_option( WCPG_Auto_Uploader::OPTION_ENABLED, true );
 		update_option( WCPG_Auto_Uploader::OPTION_INGEST_URL, 'https://ingest.example.com/upload' );
-		update_option( 'wcpg_support_site_secret', 'test_secret_value_123' );
 
-		// Capture the args passed to wp_remote_request.
-		$GLOBALS['wcpg_mock_http_response']   = array(
-			'response' => array( 'code' => 200 ),
+		// 3. Configure HTTP mock to return a successful response and capture args.
+		$GLOBALS['wcpg_mock_http_response'] = array(
+			'response' => array( 'code' => 200, 'message' => 'OK' ),
 			'body'     => '{"ok":true}',
 			'headers'  => array(),
 		);
-		$GLOBALS['wcpg_last_http_args']        = null;
-		$GLOBALS['wcpg_last_http_url']         = null;
+		$GLOBALS['wcpg_last_http_url']  = null;
+		$GLOBALS['wcpg_last_http_args'] = null;
 
-		// Intercept wcpg_http_request by overriding the underlying wp_remote_request
-		// via the global (already mocked). We'll instead verify the signature by
-		// reconstructing it from the known secret and captured body.
-
+		// 4. Trigger the upload.
 		$uploader = new WCPG_Auto_Uploader();
-		$uploader->handle_critical_event( 'sig_test', array( 'foo' => 'bar' ) );
+		$uploader->handle_critical_event( 'test_reason', array() );
 
-		// The signature was computed; verify by checking log success=true
-		// (means the POST was made and the signature was generated correctly).
-		$events = WCPG_Event_Log::recent( 1, WCPG_Event_Log::TYPE_CRITICAL );
-		$this->assertCount( 1, $events );
-		$this->assertSame( 'auto_upload', $events[0]['data']['action'] );
+		// Ensure the HTTP call was actually made.
+		$this->assertNotNull(
+			$GLOBALS['wcpg_last_http_args'],
+			'wp_remote_request must have been called'
+		);
 
-		// Additionally verify that get_or_create_site_secret returned the option value.
+		// 5. Read captured timestamp and body.
+		$ts   = $GLOBALS['wcpg_last_http_args']['headers']['X-Digipay-Timestamp'];
+		$body = $GLOBALS['wcpg_last_http_args']['body'];
+
+		// 6. Compute expected signature.
+		$expected_sig = hash_hmac( 'sha512', $ts . '.' . $body, 'test-secret-value' );
+
+		// 7. Assert the signature matches.
 		$this->assertSame(
-			'test_secret_value_123',
-			WCPG_Auto_Uploader::get_or_create_site_secret(),
-			'get_or_create_site_secret must return the stored option value'
+			$expected_sig,
+			$GLOBALS['wcpg_last_http_args']['headers']['X-Digipay-Signature'],
+			'X-Digipay-Signature must be HMAC-SHA512 of timestamp.body using site secret'
 		);
 	}
 

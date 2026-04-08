@@ -125,7 +125,21 @@ class WCPG_Auto_Uploader {
 		$json_body = wp_json_encode( $body_data );
 
 		// 6. Compute HMAC-SHA512 signature.
-		$secret    = self::get_or_create_site_secret();
+		$secret = self::get_or_create_site_secret();
+		if ( '' === $secret ) {
+			if ( class_exists( 'WCPG_Event_Log' ) ) {
+				WCPG_Event_Log::record(
+					WCPG_Event_Log::TYPE_CRITICAL,
+					array(
+						'action'  => 'auto_upload',
+						'reason'  => $reason,
+						'error'   => 'no_csprng: could not generate site secret',
+						'success' => false,
+					)
+				);
+			}
+			return;
+		}
 		$signature = hash_hmac( 'sha512', $ts . '.' . $json_body, $secret );
 
 		// 7. POST to ingestion endpoint.
@@ -144,13 +158,16 @@ class WCPG_Auto_Uploader {
 			)
 		);
 
-		// 8. Set throttle transient.
-		set_transient( self::THROTTLE_TRANSIENT, 1, self::THROTTLE_WINDOW );
+		// 8. Determine success and set throttle transient.
+		$is_wp_error   = function_exists( 'is_wp_error' ) ? is_wp_error( $response ) : false;
+		$response_code = $is_wp_error ? 0 : (int) wp_remote_retrieve_response_code( $response );
+		$success       = ! $is_wp_error && $response_code >= 200 && $response_code < 300;
+
+		// Full 1-hour throttle on success; short 5-minute retry window on failure.
+		$ttl = $success ? self::THROTTLE_WINDOW : ( 5 * MINUTE_IN_SECONDS );
+		set_transient( self::THROTTLE_TRANSIENT, 1, $ttl );
 
 		// 9. Record result in event log.
-		$is_wp_error    = is_array( $response ) ? false : ( function_exists( 'is_wp_error' ) ? is_wp_error( $response ) : false );
-		$response_code  = $is_wp_error ? 0 : ( is_array( $response ) && isset( $response['response']['code'] ) ? (int) $response['response']['code'] : 0 );
-		$success        = ! $is_wp_error && $response_code >= 200 && $response_code < 300;
 
 		if ( class_exists( 'WCPG_Event_Log' ) ) {
 			WCPG_Event_Log::record(
@@ -190,7 +207,7 @@ class WCPG_Auto_Uploader {
 
 		do_action(
 			'wcpg_critical_event',
-			'hmac_failures',
+			'hmac_threshold',
 			array(
 				'hmac_fail_count' => $hmac_fail,
 				'threshold'       => self::HMAC_CRITICAL_THRESHOLD,
@@ -240,8 +257,18 @@ class WCPG_Auto_Uploader {
 		try {
 			$secret = bin2hex( random_bytes( 16 ) );
 		} catch ( \Exception $e ) {
-			// Fallback — very unlikely path.
-			$secret = bin2hex( uniqid( '', true ) );
+			// random_bytes failed; try openssl as CSPRNG fallback.
+			if ( function_exists( 'openssl_random_pseudo_bytes' ) ) {
+				$strong = false;
+				$raw    = openssl_random_pseudo_bytes( 16, $strong );
+				if ( $strong && false !== $raw ) {
+					$secret = bin2hex( $raw );
+				} else {
+					return ''; // Give up — caller must handle.
+				}
+			} else {
+				return ''; // No CSPRNG available; abort.
+			}
 		}
 
 		update_option( 'wcpg_support_site_secret', $secret, false );
@@ -262,7 +289,18 @@ class WCPG_Auto_Uploader {
 		try {
 			$site_id = bin2hex( random_bytes( 8 ) );
 		} catch ( \Exception $e ) {
-			$site_id = bin2hex( uniqid( '', true ) );
+			// random_bytes failed; try openssl as CSPRNG fallback.
+			if ( function_exists( 'openssl_random_pseudo_bytes' ) ) {
+				$strong = false;
+				$raw    = openssl_random_pseudo_bytes( 8, $strong );
+				if ( $strong && false !== $raw ) {
+					$site_id = bin2hex( $raw );
+				} else {
+					return ''; // Give up — caller must handle.
+				}
+			} else {
+				return ''; // No CSPRNG available; abort.
+			}
 		}
 
 		update_option( 'wcpg_support_site_id', $site_id, false );

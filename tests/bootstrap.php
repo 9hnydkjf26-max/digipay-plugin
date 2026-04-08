@@ -1230,8 +1230,11 @@ if ( ! function_exists( 'wp_unslash' ) ) {
 
 // Mock wp_remote_request function.
 // If $GLOBALS['wcpg_mock_http_response'] is set, return it; otherwise return a default 200 response.
+// Always captures outgoing URL and args into $GLOBALS['wcpg_last_http_url'] / $GLOBALS['wcpg_last_http_args'].
 if ( ! function_exists( 'wp_remote_request' ) ) {
 	function wp_remote_request( $url, $args = array() ) {
+		$GLOBALS['wcpg_last_http_url']  = $url;
+		$GLOBALS['wcpg_last_http_args'] = $args;
 		if ( isset( $GLOBALS['wcpg_mock_http_response'] ) && null !== $GLOBALS['wcpg_mock_http_response'] ) {
 			return $GLOBALS['wcpg_mock_http_response'];
 		}
