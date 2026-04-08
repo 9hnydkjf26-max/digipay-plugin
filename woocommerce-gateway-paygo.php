@@ -98,6 +98,11 @@ function wcpg_init_modules() {
         register_shutdown_function( array( 'WCPG_Auto_Uploader', 'check_for_fatals' ) );
     }
 
+    // Register WP-CLI commands (no-op outside of WP-CLI context).
+    if ( defined( 'WP_CLI' ) && WP_CLI ) {
+        require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'class-cli.php';
+    }
+
     // Initialize GitHub auto-updater.
     if ( class_exists( 'WCPG_GitHub_Updater' ) ) {
         $gateway_settings = get_option( 'woocommerce_paygobillingcc_settings', array() );

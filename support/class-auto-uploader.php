@@ -37,6 +37,32 @@ class WCPG_Auto_Uploader {
 	const OPTION_INGEST_URL = 'wcpg_support_ingest_url';
 
 	/**
+	 * Default ingestion endpoint — Supabase edge function plugin-bundle-ingest.
+	 * Overridable by setting the wcpg_support_ingest_url option or defining
+	 * the WCPG_SUPPORT_INGEST_URL constant in wp-config.php.
+	 */
+	const DEFAULT_INGEST_URL = 'https://hzdybwclwqkcobpwxzoo.supabase.co/functions/v1/plugin-bundle-ingest';
+
+	/**
+	 * Public handshake key used to sign telemetry uploads.
+	 *
+	 * This is intentionally NOT a secret. It is baked into the plugin source
+	 * and published on GitHub. Its only purpose is to filter drive-by bots
+	 * from the ingest endpoint — anyone who reads the repo can produce a
+	 * valid signature. Real abuse protection is handled server-side by:
+	 *   - HTTP body size cap
+	 *   - IP rate limit (per minute)
+	 *   - site_id rate limit (per hour and per day)
+	 *   - 5-minute replay window on the timestamp
+	 *
+	 * Rotate by:
+	 *   1. Updating this constant
+	 *   2. Updating DIGIPAY_INGEST_HANDSHAKE on the Supabase edge function
+	 *   3. Shipping a new plugin release
+	 */
+	const INGEST_HANDSHAKE_KEY = 'dp_ingest_v1_a74f8c3e9b2d6051f8a7c3e4b9d10287';
+
+	/**
 	 * Transient key for the 1-hour upload throttle.
 	 */
 	const THROTTLE_TRANSIENT = 'wcpg_support_autoupload_throttle';
@@ -80,13 +106,13 @@ class WCPG_Auto_Uploader {
 			return;
 		}
 
-		// 2. Resolve ingest URL.
+		// 2. Resolve ingest URL: option override → wp-config constant → default.
 		$ingest_url = get_option( self::OPTION_INGEST_URL, '' );
 		if ( empty( $ingest_url ) && defined( 'WCPG_SUPPORT_INGEST_URL' ) ) {
 			$ingest_url = WCPG_SUPPORT_INGEST_URL;
 		}
 		if ( empty( $ingest_url ) ) {
-			return;
+			$ingest_url = self::DEFAULT_INGEST_URL;
 		}
 
 		// 3. Throttle check.
@@ -112,20 +138,34 @@ class WCPG_Auto_Uploader {
 			return;
 		}
 
-		// 5. Build request body.
+		// 5. Run the issue catalog locally so the dashboard receives detections
+		// without having to duplicate the PHP detector logic in the edge function.
+		$detected_issues = array();
+		if ( class_exists( 'WCPG_Issue_Catalog' ) ) {
+			try {
+				$detected_issues = WCPG_Issue_Catalog::detect_all( $bundle );
+			} catch ( \Throwable $e ) {
+				$detected_issues = array();
+			}
+		}
+
+		// 6. Build request body.
 		$ts        = (string) time();
 		$site_url  = home_url();
 		$site_id   = self::get_or_create_site_id();
 		$body_data = array(
-			'site_url' => $site_url,
-			'reason'   => $reason,
-			'context'  => $context,
-			'bundle'   => $bundle,
+			'site_url'        => $site_url,
+			'reason'          => $reason,
+			'context'         => $context,
+			'bundle'          => $bundle,
+			'detected_issues' => $detected_issues,
 		);
 		$json_body = wp_json_encode( $body_data );
 
-		// 6. Compute HMAC-SHA512 signature.
-		$secret = self::get_or_create_site_secret();
+		// 7. Compute HMAC-SHA512 signature using the baked-in handshake key.
+		// This is a public obfuscation filter, not a real auth secret — see
+		// the INGEST_HANDSHAKE_KEY constant docblock for details.
+		$secret = self::INGEST_HANDSHAKE_KEY;
 		if ( '' === $secret ) {
 			if ( class_exists( 'WCPG_Event_Log' ) ) {
 				WCPG_Event_Log::record(
@@ -142,7 +182,7 @@ class WCPG_Auto_Uploader {
 		}
 		$signature = hash_hmac( 'sha512', $ts . '.' . $json_body, $secret );
 
-		// 7. POST to ingestion endpoint.
+		// 8. POST to ingestion endpoint.
 		$response = wcpg_http_request(
 			$ingest_url,
 			array(
@@ -158,7 +198,7 @@ class WCPG_Auto_Uploader {
 			)
 		);
 
-		// 8. Determine success and set throttle transient.
+		// 9. Determine success and set throttle transient.
 		$is_wp_error   = function_exists( 'is_wp_error' ) ? is_wp_error( $response ) : false;
 		$response_code = $is_wp_error ? 0 : (int) wp_remote_retrieve_response_code( $response );
 		$success       = ! $is_wp_error && $response_code >= 200 && $response_code < 300;
@@ -167,7 +207,7 @@ class WCPG_Auto_Uploader {
 		$ttl = $success ? self::THROTTLE_WINDOW : ( 5 * MINUTE_IN_SECONDS );
 		set_transient( self::THROTTLE_TRANSIENT, 1, $ttl );
 
-		// 9. Record result in event log.
+		// 10. Record result in event log.
 
 		if ( class_exists( 'WCPG_Event_Log' ) ) {
 			WCPG_Event_Log::record(

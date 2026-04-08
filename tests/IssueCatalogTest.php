@@ -313,6 +313,85 @@ class IssueCatalogTest extends DigipayTestCase {
 	}
 
 	// ------------------------------------------------------------------
+	// fixed_in auto-suppress
+	// ------------------------------------------------------------------
+
+	protected function tearDown(): void {
+		WCPG_Issue_Catalog::$current_version_override = null;
+		WCPG_Issue_Catalog::$extra_issues_for_test    = array();
+		parent::tearDown();
+	}
+
+	public function test_fixed_in_suppresses_issue_when_current_version_is_at_or_above() {
+		WCPG_Issue_Catalog::$extra_issues_for_test = array(
+			array(
+				'id'            => 'WCPG-T-999',
+				'title'         => 'Test issue (fixed)',
+				'plain_english' => 'Synthetic test entry.',
+				'fix'           => 'n/a',
+				'severity'      => WCPG_Issue_Catalog::SEV_WARNING,
+				'config_only'   => false,
+				'introduced_in' => '10.0.0',
+				'fixed_in'      => '13.2.0',
+				'related_pr'    => 'digipay/plugin#999',
+				'detector'      => static function () {
+					return true;
+				},
+			),
+		);
+
+		WCPG_Issue_Catalog::$current_version_override = '13.2.0';
+		$ids = array_column( WCPG_Issue_Catalog::detect_all( array() ), 'id' );
+		$this->assertNotContains( 'WCPG-T-999', $ids, 'fixed_in should suppress at exact version' );
+
+		WCPG_Issue_Catalog::$current_version_override = '14.0.0';
+		$ids = array_column( WCPG_Issue_Catalog::detect_all( array() ), 'id' );
+		$this->assertNotContains( 'WCPG-T-999', $ids, 'fixed_in should suppress at higher version' );
+	}
+
+	public function test_fixed_in_does_not_suppress_when_current_version_is_below() {
+		WCPG_Issue_Catalog::$extra_issues_for_test = array(
+			array(
+				'id'            => 'WCPG-T-998',
+				'title'         => 'Test issue (not yet fixed)',
+				'plain_english' => 'Synthetic test entry.',
+				'fix'           => 'n/a',
+				'severity'      => WCPG_Issue_Catalog::SEV_WARNING,
+				'config_only'   => false,
+				'fixed_in'      => '99.9.9',
+				'detector'      => static function () {
+					return true;
+				},
+			),
+		);
+		WCPG_Issue_Catalog::$current_version_override = '13.1.6';
+
+		$ids = array_column( WCPG_Issue_Catalog::detect_all( array() ), 'id' );
+		$this->assertContains( 'WCPG-T-998', $ids );
+	}
+
+	public function test_fixed_in_suppression_also_applies_to_detect_config_only() {
+		WCPG_Issue_Catalog::$extra_issues_for_test = array(
+			array(
+				'id'            => 'WCPG-T-997',
+				'title'         => 'Test config issue (fixed)',
+				'plain_english' => 'Synthetic.',
+				'fix'           => 'n/a',
+				'severity'      => WCPG_Issue_Catalog::SEV_WARNING,
+				'config_only'   => true,
+				'fixed_in'      => '1.0.0',
+				'detector'      => static function () {
+					return true;
+				},
+			),
+		);
+		WCPG_Issue_Catalog::$current_version_override = '13.1.6';
+
+		$ids = array_column( WCPG_Issue_Catalog::detect_config_only( array() ), 'id' );
+		$this->assertNotContains( 'WCPG-T-997', $ids );
+	}
+
+	// ------------------------------------------------------------------
 	// Helpers
 	// ------------------------------------------------------------------
 

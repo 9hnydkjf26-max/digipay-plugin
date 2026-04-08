@@ -34,6 +34,57 @@ class WCPG_Issue_Catalog {
 	const SEV_ERROR    = 'error';
 	const SEV_CRITICAL = 'critical';
 
+	/**
+	 * Override for the current plugin version. Tests set this to exercise
+	 * the fixed_in auto-suppress path. Null means: use WCPG_VERSION constant.
+	 *
+	 * @var string|null
+	 */
+	public static $current_version_override = null;
+
+	/**
+	 * Extra catalog entries injected by tests. Merged into all() output.
+	 * Production code never sets this.
+	 *
+	 * @var array
+	 */
+	public static $extra_issues_for_test = array();
+
+	/**
+	 * Resolve the current plugin version for fixed_in comparison.
+	 *
+	 * @return string|null
+	 */
+	private static function current_version() {
+		if ( null !== self::$current_version_override ) {
+			return self::$current_version_override;
+		}
+		return defined( 'WCPG_VERSION' ) ? WCPG_VERSION : null;
+	}
+
+	/**
+	 * Whether an issue is suppressed because the running plugin version is at
+	 * or beyond its fixed_in version.
+	 *
+	 * Optional issue fields used here:
+	 *   - introduced_in : string  Plugin version that first exhibited the issue.
+	 *   - fixed_in      : string  Plugin version that resolved the root cause.
+	 *   - related_pr    : string  "owner/repo#123" reference for the fix.
+	 *
+	 * @param array $issue Catalog entry.
+	 * @return bool
+	 */
+	private static function is_suppressed_by_version( array $issue ) {
+		if ( empty( $issue['fixed_in'] ) ) {
+			return false;
+		}
+		$current = self::current_version();
+		if ( null === $current || '' === $current ) {
+			return false;
+		}
+		return version_compare( $current, (string) $issue['fixed_in'], '>=' );
+	}
+
 	// ------------------------------------------------------------------
 	// Public API
 	// ------------------------------------------------------------------
@@ -44,6 +95,19 @@ class WCPG_Issue_Catalog {
 	 * @return array[] Each entry: id, title, plain_english, fix, severity, config_only, detector.
 	 */
 	public static function all() {
+		$catalog = self::built_in_issues();
+		if ( ! empty( self::$extra_issues_for_test ) ) {
+			$catalog = array_merge( $catalog, self::$extra_issues_for_test );
+		}
+		return $catalog;
+	}
+
+	/**
+	 * Built-in catalog entries.
+	 *
+	 * @return array[]
+	 */
+	private static function built_in_issues() {
 		return array(
 
 			// ----------------------------------------------------------
@@ -390,6 +454,9 @@ class WCPG_Issue_Catalog {
 		$matched = array();
 
 		foreach ( self::all() as $issue ) {
+			if ( self::is_suppressed_by_version( $issue ) ) {
+				continue;
+			}
 			$detector = $issue['detector'];
 			if ( is_callable( $detector ) && $detector( $bundle ) ) {
 				unset( $issue['detector'] );
@@ -412,6 +479,9 @@ class WCPG_Issue_Catalog {
 
 		foreach ( self::all() as $issue ) {
 			if ( ! $issue['config_only'] ) {
+				continue;
+			}
+			if ( self::is_suppressed_by_version( $issue ) ) {
 				continue;
 			}
 			$detector = $issue['detector'];
