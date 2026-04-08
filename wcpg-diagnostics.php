@@ -213,9 +213,10 @@ function wcpg_check_connectivity() {
     if ( ! empty( $site_id ) ) {
         $query_args['site_id'] = $site_id;
     }
-    $response = wp_remote_get(
+    $response = wcpg_http_request(
         add_query_arg( $query_args, $api_url ),
         array(
+            'method' => 'GET',
             'timeout' => 15,
             'sslverify' => true,
             'headers' => array( 'Accept' => 'application/json' )
@@ -377,15 +378,16 @@ function wcpg_test_api_connection() {
         $query_args['site_id'] = $site_id;
     }
 
-    $response = wp_remote_get(
+    $response = wcpg_http_request(
         add_query_arg( $query_args, $api_url ),
         array(
+            'method' => 'GET',
             'timeout' => 15,
             'sslverify' => true,
             'headers' => array( 'Accept' => 'application/json' )
         )
     );
-    
+
     $end_time = microtime( true );
     $result['response_time_ms'] = round( ( $end_time - $start_time ) * 1000 );
     
@@ -456,9 +458,10 @@ function wcpg_test_postback_url() {
     
     // POST with a dummy session ID — the REST route only accepts POST.
     // An invalid session triggers the "order does not exist" response we check for.
-    $response = wp_remote_post(
+    $response = wcpg_http_request(
         $postback_url,
         array(
+            'method' => 'POST',
             'timeout' => 15,
             'sslverify' => true,
             'user-agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -728,9 +731,10 @@ function wcpg_report_health() {
     
     // Send to central dashboard - use configurable URL
     $health_report_url = $gateway->health_report_url;
-    $response = wp_remote_post(
+    $response = wcpg_http_request(
         $health_report_url,
         array(
+            'method' => 'POST',
             'timeout' => 10,
             'headers' => array( 'Content-Type' => 'application/json' ),
             'body' => json_encode( $health_data )
@@ -803,9 +807,10 @@ function wcpg_test_inbound_connectivity() {
     
     $start_time = microtime( true );
     
-    $response = wp_remote_post( 
+    $response = wcpg_http_request(
         $test_url,
         array(
+            'method' => 'POST',
             'timeout' => 30, // Allow more time since this involves two network hops
             'headers' => array( 'Content-Type' => 'application/json' ),
             'body' => json_encode( array(

@@ -164,9 +164,10 @@ class WCPG_ETransfer_API_Client {
 
 		wc_get_logger()->info( 'E-Transfer OAuth: Requesting token from ' . $endpoint . ' with client_id: ' . substr( $this->client_id, 0, 8 ) . '...', array( 'source' => 'digipay-etransfer' ) );
 
-		$response = wp_remote_post(
+		$response = wcpg_http_request(
 			$endpoint,
 			array(
+				'method'  => 'POST',
 				'headers' => array(
 					'Content-Type' => 'application/json',
 					'Accept'       => 'application/json',
@@ -252,9 +253,10 @@ class WCPG_ETransfer_API_Client {
 
 		wc_get_logger()->info( 'E-Transfer API: POST ' . $endpoint . ' | retry=' . ( $is_retry ? 'yes' : 'no' ), array( 'source' => 'digipay-etransfer' ) );
 
-		$response = wp_remote_post(
+		$response = wcpg_http_request(
 			$endpoint,
 			array(
+				'method'  => 'POST',
 				'headers' => $headers,
 				'body'    => wp_json_encode( $body ),
 				'timeout' => 30,
@@ -305,9 +307,10 @@ class WCPG_ETransfer_API_Client {
 		$base_url = $this->get_base_url();
 		$endpoint = $base_url . '/api/v1/login';
 
-		$response = wp_remote_post(
+		$response = wcpg_http_request(
 			$endpoint,
 			array(
+				'method'  => 'POST',
 				'headers' => array(
 					'Content-Type' => 'application/json',
 					'Accept'       => 'application/json',

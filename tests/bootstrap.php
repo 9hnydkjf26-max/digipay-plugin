@@ -837,6 +837,12 @@ if ( ! function_exists( 'wp_remote_get' ) ) {
 // Mock wp_remote_retrieve_body function.
 if ( ! function_exists( 'wp_remote_retrieve_body' ) ) {
 	function wp_remote_retrieve_body( $response ) {
+		if ( is_wp_error( $response ) ) {
+			return '';
+		}
+		if ( isset( $response['body'] ) ) {
+			return (string) $response['body'];
+		}
 		return '';
 	}
 }
@@ -1189,6 +1195,57 @@ if ( ! function_exists( 'register_deactivation_hook' ) ) {
 if ( ! function_exists( 'wp_unslash' ) ) {
 	function wp_unslash( $value ) {
 		return is_string( $value ) ? stripslashes( $value ) : $value;
+	}
+}
+
+// Mock wp_remote_request function.
+// If $GLOBALS['wcpg_mock_http_response'] is set, return it; otherwise return a default 200 response.
+if ( ! function_exists( 'wp_remote_request' ) ) {
+	function wp_remote_request( $url, $args = array() ) {
+		if ( isset( $GLOBALS['wcpg_mock_http_response'] ) && null !== $GLOBALS['wcpg_mock_http_response'] ) {
+			return $GLOBALS['wcpg_mock_http_response'];
+		}
+		// Default successful response.
+		return array(
+			'response' => array( 'code' => 200, 'message' => 'OK' ),
+			'body'     => '',
+			'headers'  => array(),
+		);
+	}
+}
+
+// Mock wp_remote_retrieve_response_code function.
+if ( ! function_exists( 'wp_remote_retrieve_response_code' ) ) {
+	function wp_remote_retrieve_response_code( $response ) {
+		if ( is_wp_error( $response ) ) {
+			return 0;
+		}
+		if ( isset( $response['response']['code'] ) ) {
+			return (int) $response['response']['code'];
+		}
+		return 0;
+	}
+}
+
+// Mock wp_parse_url function (alias of parse_url).
+if ( ! function_exists( 'wp_parse_url' ) ) {
+	function wp_parse_url( $url, $component = -1 ) {
+		return parse_url( $url, $component );
+	}
+}
+
+// Mock add_query_arg function.
+if ( ! function_exists( 'add_query_arg' ) ) {
+	function add_query_arg( $args, $url = '' ) {
+		if ( is_array( $args ) && is_string( $url ) ) {
+			$separator = ( strpos( $url, '?' ) !== false ) ? '&' : '?';
+			$parts = array();
+			foreach ( $args as $key => $value ) {
+				$parts[] = urlencode( $key ) . '=' . urlencode( $value );
+			}
+			return $url . ( $parts ? $separator . implode( '&', $parts ) : '' );
+		}
+		return $url;
 	}
 }
 

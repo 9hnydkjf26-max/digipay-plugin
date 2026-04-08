@@ -2104,9 +2104,10 @@ function wcpg_gateway_init() {
 				$query_args['site_id'] = $site_id;
 			}
 
-			$response = wp_remote_get(
+			$response = wcpg_http_request(
 				add_query_arg( $query_args, $this->limits_api_url ),
 				array(
+					'method'    => 'GET',
 					'timeout'   => 15,
 					'sslverify' => true,
 					'headers'   => array( 'Accept' => 'application/json' ),

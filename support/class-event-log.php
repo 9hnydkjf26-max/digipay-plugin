@@ -117,3 +117,122 @@ class WCPG_Event_Log {
 		delete_option( self::OPTION_KEY );
 	}
 }
+
+/**
+ * Redact sensitive query-string parameter values from a URL.
+ *
+ * Any parameter whose KEY matches /key|secret|token|password|credential/i
+ * has its value replaced with [REDACTED]. Host and path are unchanged.
+ *
+ * @param string $url Input URL.
+ * @return string URL with sensitive query-param values redacted.
+ */
+function wcpg_redact_url_query( $url ) {
+	if ( ! is_string( $url ) || '' === $url ) {
+		return $url;
+	}
+
+	$parts = wp_parse_url( $url );
+	if ( ! is_array( $parts ) ) {
+		// Unparseable URL — return as-is.
+		return $url;
+	}
+
+	if ( empty( $parts['query'] ) ) {
+		return $url;
+	}
+
+	// Parse query string into key => value pairs.
+	parse_str( $parts['query'], $query_params );
+
+	$redact_regex = '/key|secret|token|password|credential/i';
+	$changed      = false;
+	foreach ( $query_params as $k => $v ) {
+		if ( preg_match( $redact_regex, $k ) ) {
+			$query_params[ $k ] = '[REDACTED]';
+			$changed            = true;
+		}
+	}
+
+	if ( ! $changed ) {
+		return $url;
+	}
+
+	// Rebuild URL from parts.
+	$rebuilt = '';
+	if ( ! empty( $parts['scheme'] ) ) {
+		$rebuilt .= $parts['scheme'] . '://';
+	}
+	if ( ! empty( $parts['host'] ) ) {
+		$rebuilt .= $parts['host'];
+	}
+	if ( ! empty( $parts['port'] ) ) {
+		$rebuilt .= ':' . $parts['port'];
+	}
+	if ( ! empty( $parts['path'] ) ) {
+		$rebuilt .= $parts['path'];
+	}
+	$rebuilt .= '?' . http_build_query( $query_params );
+	if ( ! empty( $parts['fragment'] ) ) {
+		$rebuilt .= '#' . $parts['fragment'];
+	}
+
+	return $rebuilt;
+}
+
+/**
+ * Drop-in wrapper around wp_remote_request that times the request and
+ * records a TYPE_API_CALL event to WCPG_Event_Log.
+ *
+ * @param string $url  Request URL.
+ * @param array  $args wp_remote_request args (method, headers, body, timeout, …).
+ * @return array|WP_Error Raw wp_remote_request response.
+ */
+function wcpg_http_request( $url, $args = array() ) {
+	$start  = microtime( true );
+	$response = wp_remote_request( $url, $args );
+	$elapsed  = (int) ( ( microtime( true ) - $start ) * 1000 );
+
+	$method = isset( $args['method'] ) ? strtoupper( $args['method'] ) : 'GET';
+
+	// Safely extract status, body, and error depending on WP_Error vs normal response.
+	if ( is_wp_error( $response ) ) {
+		$status        = 0;
+		$body_raw      = '';
+		$error_message = $response->get_error_message();
+	} else {
+		$code   = wp_remote_retrieve_response_code( $response );
+		$status = ( is_numeric( $code ) && '' !== $code ) ? (int) $code : 0;
+
+		$body_raw      = (string) wp_remote_retrieve_body( $response );
+		$error_message = '';
+	}
+
+	// Redact the URL.
+	$redacted_url = wcpg_redact_url_query( $url );
+
+	// Build a PII-scrubbed body preview (max 500 chars).
+	$preview = substr( $body_raw, 0, 500 );
+	if ( class_exists( 'WCPG_Context_Bundler' ) && method_exists( 'WCPG_Context_Bundler', 'scrub_pii' ) ) {
+		$preview = WCPG_Context_Bundler::scrub_pii( $preview );
+	}
+
+	// Record event (guard against load-order issues).
+	if ( class_exists( 'WCPG_Event_Log' ) ) {
+		WCPG_Event_Log::record(
+			WCPG_Event_Log::TYPE_API_CALL,
+			array(
+				'method'       => $method,
+				'url'          => $redacted_url,
+				'status'       => $status,
+				'elapsed_ms'   => $elapsed,
+				'body_preview' => $preview,
+				'error'        => $error_message,
+			),
+			null,
+			null
+		);
+	}
+
+	return $response;
+}
