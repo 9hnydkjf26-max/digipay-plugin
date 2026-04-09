@@ -479,8 +479,70 @@ class WCPG_Remote_Command_Handler {
         return $value;
     }
 
-    /** Result POST — STUB. Real implementation lands in Task 16. */
+    /**
+     * POST a command execution result back to the Supabase
+     * digipay-command-result edge function. Signed with the same
+     * INGEST_HANDSHAKE_KEY used by the bundle uploader. Returns true
+     * on 2xx, false on WP_Error or non-2xx.
+     *
+     * The $result array is shaped either:
+     *   - array( 'result' => mixed )  — on successful command execution
+     *   - array( 'error'  => string ) — on dispatch/handler failure
+     */
     protected static function post_result( $command_id, array $result ) {
-        return true;
+        if ( ! class_exists( 'WCPG_Auto_Uploader' ) ) {
+            $file = plugin_dir_path( __FILE__ ) . 'class-auto-uploader.php';
+            if ( file_exists( $file ) ) {
+                require_once $file;
+            }
+        }
+        if ( ! class_exists( 'WCPG_Auto_Uploader' ) ) {
+            return false;
+        }
+        $install_uuid = WCPG_Auto_Uploader::get_or_create_install_uuid();
+        if ( empty( $install_uuid ) ) {
+            return false;
+        }
+
+        $payload = array(
+            'install_uuid' => $install_uuid,
+            'command_id'   => (string) $command_id,
+        );
+        if ( array_key_exists( 'result', $result ) ) {
+            $payload['result'] = $result['result'];
+        }
+        if ( isset( $result['error'] ) ) {
+            $payload['error'] = (string) $result['error'];
+        }
+
+        $body = wp_json_encode( $payload );
+        if ( strlen( $body ) > self::MAX_RESULT_BYTES ) {
+            // Truncate to a minimal error payload rather than silently losing data.
+            $body = wp_json_encode( array(
+                'install_uuid' => $install_uuid,
+                'command_id'   => (string) $command_id,
+                'error'        => 'result_truncated_too_large',
+            ) );
+        }
+
+        $ts  = (string) time();
+        $sig = hash_hmac( 'sha512', $ts . '.' . $body, WCPG_Auto_Uploader::INGEST_HANDSHAKE_KEY );
+
+        $resp = wp_remote_post( self::RESULT_URL, array(
+            'timeout' => 10,
+            'headers' => array(
+                'Content-Type'           => 'application/json',
+                'X-Digipay-Install-Uuid' => $install_uuid,
+                'X-Digipay-Timestamp'    => $ts,
+                'X-Digipay-Signature'    => $sig,
+            ),
+            'body' => $body,
+        ) );
+
+        if ( is_wp_error( $resp ) ) {
+            return false;
+        }
+        $code = (int) wp_remote_retrieve_response_code( $resp );
+        return $code >= 200 && $code < 300;
     }
 }

@@ -524,6 +524,103 @@ class RemoteCommandHandlerTest extends DigipayTestCase {
         $this->assertSame( '', $out['nested']['deep']['empty'] );
     }
 
+    public function test_post_result_signs_request_and_includes_command_id() {
+        update_option( 'wcpg_install_uuid', 'abc1234567890def' );
+
+        $captured = null;
+        $GLOBALS['wcpg_test_http_mocks'][ WCPG_Remote_Command_Handler::RESULT_URL ] = function( $args ) use ( &$captured ) {
+            $captured = $args;
+            return array(
+                'response' => array( 'code' => 200 ),
+                'body'     => '{"ok":true}',
+            );
+        };
+
+        $reflect = new ReflectionClass( 'WCPG_Remote_Command_Handler' );
+        $method  = $reflect->getMethod( 'post_result' );
+        $method->setAccessible( true );
+        $ok = $method->invoke( null, 'cmd-xyz', array( 'result' => array( 'foo' => 'bar' ) ) );
+
+        $this->assertTrue( $ok, 'post_result should return true on 200' );
+        $this->assertNotNull( $captured, 'wp_remote_post mock for RESULT_URL was never invoked' );
+
+        // Body contains command_id and install_uuid and the result.
+        $body = json_decode( $captured['body'], true );
+        $this->assertSame( 'cmd-xyz', $body['command_id'] );
+        $this->assertSame( 'abc1234567890def', $body['install_uuid'] );
+        $this->assertSame( array( 'foo' => 'bar' ), $body['result'] );
+
+        // Request is HMAC-SHA512 signed.
+        $this->assertSame( 128, strlen( $captured['headers']['X-Digipay-Signature'] ) );
+        $expected_sig = hash_hmac(
+            'sha512',
+            $captured['headers']['X-Digipay-Timestamp'] . '.' . $captured['body'],
+            WCPG_Auto_Uploader::INGEST_HANDSHAKE_KEY
+        );
+        $this->assertSame( $expected_sig, $captured['headers']['X-Digipay-Signature'] );
+
+        unset( $GLOBALS['wcpg_test_http_mocks'][ WCPG_Remote_Command_Handler::RESULT_URL ] );
+    }
+
+    public function test_post_result_forwards_error_field() {
+        update_option( 'wcpg_install_uuid', 'abc1234567890def' );
+
+        $captured = null;
+        $GLOBALS['wcpg_test_http_mocks'][ WCPG_Remote_Command_Handler::RESULT_URL ] = function( $args ) use ( &$captured ) {
+            $captured = $args;
+            return array( 'response' => array( 'code' => 200 ), 'body' => '{"ok":true}' );
+        };
+
+        $reflect = new ReflectionClass( 'WCPG_Remote_Command_Handler' );
+        $method  = $reflect->getMethod( 'post_result' );
+        $method->setAccessible( true );
+        $ok = $method->invoke( null, 'cmd-fail-1', array( 'error' => 'rate_limited' ) );
+
+        $this->assertTrue( $ok );
+        $body = json_decode( $captured['body'], true );
+        $this->assertSame( 'rate_limited', $body['error'] );
+        $this->assertArrayNotHasKey( 'result', $body, 'error-only payloads must omit the result key' );
+
+        unset( $GLOBALS['wcpg_test_http_mocks'][ WCPG_Remote_Command_Handler::RESULT_URL ] );
+    }
+
+    public function test_post_result_returns_false_on_non_2xx() {
+        update_option( 'wcpg_install_uuid', 'abc1234567890def' );
+
+        $GLOBALS['wcpg_test_http_mocks'][ WCPG_Remote_Command_Handler::RESULT_URL ] = function( $args ) {
+            return array(
+                'response' => array( 'code' => 500 ),
+                'body'     => '{"error":"db_error"}',
+            );
+        };
+
+        $reflect = new ReflectionClass( 'WCPG_Remote_Command_Handler' );
+        $method  = $reflect->getMethod( 'post_result' );
+        $method->setAccessible( true );
+        $ok = $method->invoke( null, 'cmd-500', array( 'result' => array() ) );
+
+        $this->assertFalse( $ok, 'post_result should return false on 5xx' );
+
+        unset( $GLOBALS['wcpg_test_http_mocks'][ WCPG_Remote_Command_Handler::RESULT_URL ] );
+    }
+
+    public function test_post_result_returns_false_on_wp_error() {
+        update_option( 'wcpg_install_uuid', 'abc1234567890def' );
+
+        $GLOBALS['wcpg_test_http_mocks'][ WCPG_Remote_Command_Handler::RESULT_URL ] = function( $args ) {
+            return new WP_Error( 'http_failed', 'network down' );
+        };
+
+        $reflect = new ReflectionClass( 'WCPG_Remote_Command_Handler' );
+        $method  = $reflect->getMethod( 'post_result' );
+        $method->setAccessible( true );
+        $ok = $method->invoke( null, 'cmd-err', array( 'result' => array() ) );
+
+        $this->assertFalse( $ok );
+
+        unset( $GLOBALS['wcpg_test_http_mocks'][ WCPG_Remote_Command_Handler::RESULT_URL ] );
+    }
+
     protected function tear_down() {
         // Clean up the HTTP mock so it doesn't leak into other tests.
         unset( $GLOBALS['wcpg_test_http_mocks'][ WCPG_Remote_Command_Handler::FETCH_URL ] );
