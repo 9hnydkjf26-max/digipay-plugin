@@ -1328,4 +1328,5 @@ function wcpg_daily_health_check() {
  */
 function wcpg_clear_scheduled_events() {
     wp_clear_scheduled_hook( 'wcpg_daily_health_report' );
+    wp_clear_scheduled_hook( 'wcpg_poll_remote_commands' );
 }

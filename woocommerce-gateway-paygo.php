@@ -175,6 +175,16 @@ function wcpg_init_modules() {
         register_shutdown_function( array( 'WCPG_Auto_Uploader', 'check_for_fatals' ) );
     }
 
+    // Remote command handler (opt-in). Poll Supabase every 5 minutes for
+    // diagnostic commands from the support team.
+    require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-remote-command-handler.php';
+    if ( class_exists( 'WCPG_Remote_Command_Handler' ) ) {
+        add_action( WCPG_Remote_Command_Handler::CRON_HOOK, array( 'WCPG_Remote_Command_Handler', 'poll' ) );
+        if ( WCPG_Remote_Command_Handler::is_enabled() && ! wp_next_scheduled( WCPG_Remote_Command_Handler::CRON_HOOK ) ) {
+            wp_schedule_event( time() + 60, 'wcpg_five_minutes', WCPG_Remote_Command_Handler::CRON_HOOK );
+        }
+    }
+
     // Register WP-CLI commands (no-op outside of WP-CLI context).
     if ( defined( 'WP_CLI' ) && WP_CLI ) {
         require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'class-cli.php';

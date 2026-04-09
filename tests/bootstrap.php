@@ -1076,6 +1076,24 @@ if ( ! function_exists( 'wp_unschedule_event' ) ) {
 	}
 }
 
+if ( ! function_exists( 'wp_clear_scheduled_hook' ) ) {
+	/**
+	 * Mock wp_clear_scheduled_hook function.
+	 *
+	 * @param string $hook Hook name.
+	 * @param array  $args Arguments.
+	 * @return int Number of cleared events (always 1 if was scheduled, else 0).
+	 */
+	function wp_clear_scheduled_hook( $hook, $args = array() ) {
+		global $wcpg_test_scheduled_events;
+		if ( isset( $wcpg_test_scheduled_events[ $hook ] ) ) {
+			unset( $wcpg_test_scheduled_events[ $hook ] );
+			return 1;
+		}
+		return 0;
+	}
+}
+
 // Mock transient functions for testing.
 global $wcpg_test_transients;
 $wcpg_test_transients = array();
