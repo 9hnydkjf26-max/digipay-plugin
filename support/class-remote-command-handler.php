@@ -382,7 +382,43 @@ class WCPG_Remote_Command_Handler {
         );
     }
     protected static function cmd_test_postback_route( array $params ) {
-        return array();
+        $url = function_exists( 'rest_url' )
+            ? rest_url( 'digipay/v1/postback' )
+            : home_url( '/wp-json/digipay/v1/postback' );
+
+        $started = microtime( true );
+        // POST a deliberately-invalid body so the route responds with a 4xx error,
+        // which proves the route is wired up without creating or mutating any orders.
+        $resp = wp_remote_post( $url, array(
+            'timeout' => 5,
+            'headers' => array( 'Content-Type' => 'application/json' ),
+            'body'    => wp_json_encode( array( '_wcpg_route_probe' => true ) ),
+        ) );
+        $latency_ms = (int) round( ( microtime( true ) - $started ) * 1000 );
+
+        if ( is_wp_error( $resp ) ) {
+            return array(
+                'resolved'   => false,
+                'http_code'  => 0,
+                'latency_ms' => $latency_ms,
+                'url'        => $url,
+                'error'      => $resp->get_error_message(),
+            );
+        }
+
+        $code = (int) wp_remote_retrieve_response_code( $resp );
+        // Any response in the 1xx-4xx range means the route exists and was
+        // reached. 5xx or 0 means something is broken between client and route.
+        $resolved = $code > 0 && $code < 500;
+        $body = wp_remote_retrieve_body( $resp );
+
+        return array(
+            'resolved'   => $resolved,
+            'http_code'  => $code,
+            'latency_ms' => $latency_ms,
+            'url'        => $url,
+            'body_hint'  => is_string( $body ) ? substr( $body, 0, 200 ) : '',
+        );
     }
 
     /** Rate limiter — STUB. Real implementation lands in Task 14. */

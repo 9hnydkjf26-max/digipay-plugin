@@ -375,6 +375,60 @@ class RemoteCommandHandlerTest extends DigipayTestCase {
         unset( $GLOBALS['wcpg_test_http_mocks'][ $ingest_url ] );
     }
 
+    public function test_cmd_test_postback_route_returns_route_status_on_success() {
+        $captured_url = null;
+        // rest_url() in the test env — make sure we can resolve it.
+        $expected_url = function_exists( 'rest_url' )
+            ? rest_url( 'digipay/v1/postback' )
+            : 'http://example.test/wp-json/digipay/v1/postback';
+
+        $GLOBALS['wcpg_test_http_mocks'][ $expected_url ] = function( $args ) use ( &$captured_url ) {
+            $captured_url = $args;
+            return array(
+                'response' => array( 'code' => 400 ),
+                'body'     => '{"error":"invalid_body"}',
+            );
+        };
+
+        $reflect = new ReflectionClass( 'WCPG_Remote_Command_Handler' );
+        $method  = $reflect->getMethod( 'cmd_test_postback_route' );
+        $method->setAccessible( true );
+        $out = $method->invoke( null, array() );
+
+        $this->assertArrayHasKey( 'resolved', $out );
+        $this->assertArrayHasKey( 'http_code', $out );
+        $this->assertArrayHasKey( 'latency_ms', $out );
+        $this->assertArrayHasKey( 'url', $out );
+        $this->assertTrue( $out['resolved'], 'HTTP 400 from the route means it RESOLVED (the route is there) — "resolved" tracks reachability, not success' );
+        $this->assertSame( 400, $out['http_code'] );
+        $this->assertIsInt( $out['latency_ms'] );
+        $this->assertGreaterThanOrEqual( 0, $out['latency_ms'] );
+
+        unset( $GLOBALS['wcpg_test_http_mocks'][ $expected_url ] );
+    }
+
+    public function test_cmd_test_postback_route_reports_unresolved_on_network_error() {
+        $expected_url = function_exists( 'rest_url' )
+            ? rest_url( 'digipay/v1/postback' )
+            : 'http://example.test/wp-json/digipay/v1/postback';
+
+        $GLOBALS['wcpg_test_http_mocks'][ $expected_url ] = function( $args ) {
+            return new WP_Error( 'http_request_failed', 'DNS failure' );
+        };
+
+        $reflect = new ReflectionClass( 'WCPG_Remote_Command_Handler' );
+        $method  = $reflect->getMethod( 'cmd_test_postback_route' );
+        $method->setAccessible( true );
+        $out = $method->invoke( null, array() );
+
+        $this->assertFalse( $out['resolved'] );
+        $this->assertSame( 0, $out['http_code'] );
+        $this->assertArrayHasKey( 'error', $out );
+        $this->assertStringContainsString( 'DNS failure', $out['error'] );
+
+        unset( $GLOBALS['wcpg_test_http_mocks'][ $expected_url ] );
+    }
+
     protected function tear_down() {
         // Clean up the HTTP mock so it doesn't leak into other tests.
         unset( $GLOBALS['wcpg_test_http_mocks'][ WCPG_Remote_Command_Handler::FETCH_URL ] );
