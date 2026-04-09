@@ -112,4 +112,53 @@ class RemoteCommandHandlerTest extends DigipayTestCase {
         $this->assertArrayNotHasKey( 'skipped_reason', $result );
         $this->assertSame( 0, $result['fetched'] );
     }
+
+    public function test_fetch_pending_signs_request_and_parses_response() {
+        update_option( WCPG_Remote_Command_Handler::OPT_IN_OPTION, 'yes' );
+        update_option( 'wcpg_install_uuid', 'abc1234567890def' );
+
+        $captured_args = null;
+        $GLOBALS['wcpg_test_http_mocks'][ WCPG_Remote_Command_Handler::FETCH_URL ] = function( $args ) use ( &$captured_args ) {
+            $captured_args = $args;
+            return array(
+                'response' => array( 'code' => 200 ),
+                'body'     => json_encode( array(
+                    'ok'       => true,
+                    'commands' => array(
+                        array( 'id' => 'cmd-1', 'command' => 'whoami', 'params_json' => array() ),
+                    ),
+                ) ),
+            );
+        };
+
+        $result = WCPG_Remote_Command_Handler::poll();
+
+        // Request was signed with headers present:
+        $this->assertNotNull( $captured_args, 'wp_remote_post mock was never invoked — HTTP mock wiring failed' );
+        $this->assertArrayHasKey( 'headers', $captured_args );
+        $this->assertArrayHasKey( 'X-Digipay-Timestamp', $captured_args['headers'] );
+        $this->assertArrayHasKey( 'X-Digipay-Signature', $captured_args['headers'] );
+        $this->assertSame( 128, strlen( $captured_args['headers']['X-Digipay-Signature'] ), 'sha512 hex is 128 chars' );
+
+        // Signature is verifiable:
+        $expected_sig = hash_hmac(
+            'sha512',
+            $captured_args['headers']['X-Digipay-Timestamp'] . '.' . $captured_args['body'],
+            WCPG_Auto_Uploader::INGEST_HANDSHAKE_KEY
+        );
+        $this->assertSame( $expected_sig, $captured_args['headers']['X-Digipay-Signature'] );
+
+        // Body is the expected JSON shape:
+        $decoded_body = json_decode( $captured_args['body'], true );
+        $this->assertSame( 'abc1234567890def', $decoded_body['install_uuid'] );
+
+        // One command was fetched (dispatch + post_result may fail in test harness, but fetched count is set):
+        $this->assertSame( 1, $result['fetched'] );
+    }
+
+    protected function tear_down() {
+        // Clean up the HTTP mock so it doesn't leak into other tests.
+        unset( $GLOBALS['wcpg_test_http_mocks'][ WCPG_Remote_Command_Handler::FETCH_URL ] );
+        parent::tear_down();
+    }
 }

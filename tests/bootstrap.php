@@ -850,6 +850,10 @@ $wcpg_mock_downloads = array();
 // Mock wp_remote_post function.
 if ( ! function_exists( 'wp_remote_post' ) ) {
 	function wp_remote_post( $url, $args = array() ) {
+		// Allow per-URL callbacks registered via $GLOBALS['wcpg_test_http_mocks'].
+		if ( ! empty( $GLOBALS['wcpg_test_http_mocks'][ $url ] ) && is_callable( $GLOBALS['wcpg_test_http_mocks'][ $url ] ) ) {
+			return call_user_func( $GLOBALS['wcpg_test_http_mocks'][ $url ], $args );
+		}
 		return new WP_Error( 'not_implemented', 'wp_remote_post is not available in tests' );
 	}
 }
