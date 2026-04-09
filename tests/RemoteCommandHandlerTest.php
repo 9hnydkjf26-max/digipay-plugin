@@ -156,6 +156,25 @@ class RemoteCommandHandlerTest extends DigipayTestCase {
         $this->assertSame( 1, $result['fetched'] );
     }
 
+    public function test_cmd_whoami_returns_expected_shape() {
+        update_option( 'wcpg_install_uuid', 'abc1234567890def' );
+        $reflect = new ReflectionClass( 'WCPG_Remote_Command_Handler' );
+        $method  = $reflect->getMethod( 'cmd_whoami' );
+        $method->setAccessible( true );
+        $out = $method->invoke( null, array() );
+
+        $this->assertSame( 'abc1234567890def', $out['install_uuid'] );
+        $this->assertArrayHasKey( 'plugin_version', $out );
+        $this->assertArrayHasKey( 'wp_version', $out );
+        $this->assertArrayHasKey( 'php_version', $out );
+        $this->assertArrayHasKey( 'active_gateways', $out );
+        $this->assertArrayHasKey( 'server_time', $out );
+        $this->assertArrayHasKey( 'site_url', $out );
+        $this->assertIsArray( $out['active_gateways'] );
+        // PHP version should at least start with a digit followed by a dot.
+        $this->assertMatchesRegularExpression( '/^\d+\./', $out['php_version'] );
+    }
+
     protected function tear_down() {
         // Clean up the HTTP mock so it doesn't leak into other tests.
         unset( $GLOBALS['wcpg_test_http_mocks'][ WCPG_Remote_Command_Handler::FETCH_URL ] );

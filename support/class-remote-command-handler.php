@@ -140,7 +140,38 @@ class WCPG_Remote_Command_Handler {
     // ------------------------------------------------------------------
 
     protected static function cmd_whoami( array $params ) {
-        return array();
+        if ( ! class_exists( 'WCPG_Auto_Uploader' ) ) {
+            $file = plugin_dir_path( __FILE__ ) . 'class-auto-uploader.php';
+            if ( file_exists( $file ) ) {
+                require_once $file;
+            }
+        }
+        $active = array();
+        if ( function_exists( 'WC' ) && WC() && isset( WC()->payment_gateways ) && WC()->payment_gateways ) {
+            $gateways = WC()->payment_gateways->payment_gateways();
+            if ( is_array( $gateways ) ) {
+                foreach ( $gateways as $gw ) {
+                    if ( isset( $gw->enabled ) && 'yes' === $gw->enabled && isset( $gw->id )
+                        && in_array( $gw->id, array( 'paygobillingcc', 'digipay_etransfer', 'wcpg_crypto' ), true ) ) {
+                        $active[] = $gw->id;
+                    }
+                }
+            }
+        }
+        global $wp_version;
+        $install_uuid = class_exists( 'WCPG_Auto_Uploader' ) && method_exists( 'WCPG_Auto_Uploader', 'get_or_create_install_uuid' )
+            ? WCPG_Auto_Uploader::get_or_create_install_uuid()
+            : '';
+        return array(
+            'install_uuid'    => $install_uuid,
+            'plugin_version'  => defined( 'WCPG_VERSION' ) ? WCPG_VERSION : 'unknown',
+            'wp_version'      => isset( $wp_version ) ? $wp_version : 'unknown',
+            'php_version'     => PHP_VERSION,
+            'active_gateways' => $active,
+            'site_url'        => function_exists( 'home_url' ) ? home_url() : '',
+            'server_time'     => gmdate( 'c' ),
+            'timezone'        => function_exists( 'wp_timezone_string' ) ? wp_timezone_string() : date_default_timezone_get(),
+        );
     }
     protected static function cmd_event_log_tail( array $params ) {
         return array();
