@@ -113,6 +113,22 @@ class WCPG_Support_Admin_Page {
 		<div class="wrap">
 			<h1>Digipay Support</h1>
 			<?php $this->render_maintenance_notice(); ?>
+			<?php
+			$install_uuid = class_exists( 'WCPG_Auto_Uploader' )
+				? WCPG_Auto_Uploader::get_or_create_install_uuid()
+				: '';
+			if ( ! empty( $install_uuid ) ) :
+				?>
+				<div style="background:#f0f6fc;border-left:4px solid #2271b1;padding:12px 16px;margin:12px 0;">
+					<strong>Your Install ID:</strong>
+					<code style="font-size:14px;padding:2px 8px;background:#fff;"><?php echo esc_html( $install_uuid ); ?></code>
+					<p class="description" style="margin:6px 0 0;">
+						If Digipay support asks for your Install ID, copy the value above.
+						It identifies this WordPress site to our support team and never
+						changes.
+					</p>
+				</div>
+			<?php endif; ?>
 			<p>
 				If you are having trouble with Digipay payments, click the button below. We will build a
 				diagnostic file that contains your plugin configuration, recent logs, and connectivity test
@@ -173,7 +189,7 @@ class WCPG_Support_Admin_Page {
 			<details style="margin-top:32px;">
 				<summary><strong>Auto-Upload on Critical Issues</strong></summary>
 				<div style="background:#fff; border:1px solid #ccd0d4; border-left:4px solid #2271b1; padding:15px 20px; margin:12px 0 24px;">
-					<p>If enabled, the plugin will automatically send diagnostic bundles to Digipay support when it detects a critical problem (e.g., many webhook signature failures). Digipay uses this for faster triage.</p>
+					<p>The plugin automatically sends diagnostic bundles to Digipay support when it detects a critical problem (e.g., many webhook signature failures). Digipay uses this for faster triage. This is enabled by default — uncheck to opt out.</p>
 					<?php if ( isset( $_GET['autoupload'] ) && 'saved' === $_GET['autoupload'] ) : // phpcs:ignore WordPress.Security.NonceVerification.Recommended ?>
 					<div class="notice notice-success inline"><p><?php esc_html_e( 'Auto-upload setting saved.', 'wc-payment-gateway' ); ?></p></div>
 					<?php endif; ?>
@@ -181,7 +197,7 @@ class WCPG_Support_Admin_Page {
 						<input type="hidden" name="action" value="wcpg_support_autoupload_toggle" />
 						<?php wp_nonce_field( 'wcpg_support_autoupload', 'wcpg_autoupload_nonce' ); ?>
 						<label>
-							<input type="checkbox" name="enabled" value="1" <?php checked( (bool) get_option( WCPG_Auto_Uploader::OPTION_ENABLED, false ) ); ?> />
+							<input type="checkbox" name="enabled" value="1" <?php checked( (bool) get_option( WCPG_Auto_Uploader::OPTION_ENABLED, true ) ); ?> />
 							<?php esc_html_e( 'Enable auto-upload', 'wc-payment-gateway' ); ?>
 						</label>
 						<?php submit_button( 'Save', 'secondary', 'submit', false ); ?>

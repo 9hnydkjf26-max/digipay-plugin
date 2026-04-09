@@ -2,7 +2,7 @@
 /*
 Plugin Name: WooCommerce Payment Gateway
 Description: Configurable payment gateway for WooCommerce with credit card processing
-Version: 13.1.6
+Version: 14.0.0-beta
 Author: Payment Gateway
 Author URI: https://example.com
 GitHub Plugin URI: configured-via-settings
@@ -11,7 +11,7 @@ GitHub Plugin URI: configured-via-settings
 defined( 'ABSPATH' ) or exit;
 
 // Plugin constants.
-define( 'WCPG_VERSION', '13.1.6' );
+define( 'WCPG_VERSION', '14.0.0-beta' );
 define( 'WCPG_PLUGIN_FILE', __FILE__ );
 define( 'WCPG_GATEWAY_ID', 'paygobillingcc' );
 
@@ -380,6 +380,22 @@ function wcpg_ajax_reset_defaults() {
 	wp_send_json_success( array( 'reset' => true ) );
 }
 add_action( 'wp_ajax_wcpg_reset_defaults', 'wcpg_ajax_reset_defaults' );
+
+// Generate the install UUID on activation so every site has a stable
+// identifier from the moment the plugin is turned on — not lazily on
+// the first support bundle or postback.
+register_activation_hook( __FILE__, 'wcpg_ensure_install_uuid_on_activation' );
+function wcpg_ensure_install_uuid_on_activation() {
+	if ( ! class_exists( 'WCPG_Auto_Uploader' ) ) {
+		$file = plugin_dir_path( __FILE__ ) . 'support/class-auto-uploader.php';
+		if ( file_exists( $file ) ) {
+			require_once $file;
+		}
+	}
+	if ( class_exists( 'WCPG_Auto_Uploader' ) ) {
+		WCPG_Auto_Uploader::get_or_create_install_uuid();
+	}
+}
 
 // Schedule daily health report on activation (moved from wcpg-diagnostics.php).
 register_activation_hook( __FILE__, 'wcpg_schedule_health_report' );

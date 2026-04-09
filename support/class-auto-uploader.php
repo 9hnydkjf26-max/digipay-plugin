@@ -6,7 +6,7 @@
  * errors, etc.) and the merchant has opted in, automatically POSTs a
  * diagnostic bundle to the Digipay ingestion endpoint for faster triage.
  *
- * Opt-in is off by default. The merchant must enable it on the Support page.
+ * Enabled by default (opt-out). The merchant can disable it on the Support page.
  *
  * @package DigipayMasterPlugin
  * @since 13.3.0
@@ -52,7 +52,7 @@ class WCPG_Auto_Uploader {
 	 * valid signature. Real abuse protection is handled server-side by:
 	 *   - HTTP body size cap
 	 *   - IP rate limit (per minute)
-	 *   - site_id rate limit (per hour and per day)
+	 *   - install_uuid rate limit (per hour and per day)
 	 *   - 5-minute replay window on the timestamp
 	 *
 	 * Rotate by:
@@ -101,8 +101,8 @@ class WCPG_Auto_Uploader {
 	 * @param array  $context Arbitrary context data (will be JSON-encoded).
 	 */
 	public function handle_critical_event( $reason, $context ) {
-		// 1. Opt-in check.
-		if ( ! get_option( self::OPTION_ENABLED, false ) ) {
+		// 1. Opt-out check (enabled by default).
+		if ( ! get_option( self::OPTION_ENABLED, true ) ) {
 			return;
 		}
 
@@ -152,7 +152,7 @@ class WCPG_Auto_Uploader {
 		// 6. Build request body.
 		$ts        = (string) time();
 		$site_url  = home_url();
-		$site_id   = self::get_or_create_site_id();
+		$install_uuid = self::get_or_create_install_uuid();
 		$body_data = array(
 			'site_url'        => $site_url,
 			'reason'          => $reason,
@@ -190,7 +190,7 @@ class WCPG_Auto_Uploader {
 				'body'    => $json_body,
 				'headers' => array(
 					'Content-Type'         => 'application/json',
-					'X-Digipay-Site-Id'    => $site_id,
+					'X-Digipay-Install-Uuid' => $install_uuid,
 					'X-Digipay-Timestamp'  => $ts,
 					'X-Digipay-Signature'  => $signature,
 				),
@@ -316,25 +316,41 @@ class WCPG_Auto_Uploader {
 	}
 
 	/**
-	 * Return the stored site ID, generating one if it does not exist yet.
+	 * Return the stored install UUID, generating one if it does not exist yet.
+	 *
+	 * This is a stable, auto-generated per-install identifier used to tag
+	 * diagnostic bundle uploads. It is unrelated to the 4-digit CPT gateway
+	 * "Site ID" configured in the payment gateway settings.
+	 *
+	 * Backwards compatible with pre-rename installs that stored the value
+	 * in `wcpg_support_site_id` — reads the legacy option, migrates it to
+	 * `wcpg_install_uuid`, and deletes the old key.
 	 *
 	 * @return string UUID-like identifier (16-hex-char, 8 random bytes).
 	 */
-	public static function get_or_create_site_id() {
-		$site_id = get_option( 'wcpg_support_site_id', '' );
-		if ( ! empty( $site_id ) ) {
-			return $site_id;
+	public static function get_or_create_install_uuid() {
+		$install_uuid = get_option( 'wcpg_install_uuid', '' );
+		if ( ! empty( $install_uuid ) ) {
+			return $install_uuid;
+		}
+
+		// Migrate from legacy option name if present.
+		$legacy = get_option( 'wcpg_support_site_id', '' );
+		if ( ! empty( $legacy ) ) {
+			update_option( 'wcpg_install_uuid', $legacy, false );
+			delete_option( 'wcpg_support_site_id' );
+			return $legacy;
 		}
 
 		try {
-			$site_id = bin2hex( random_bytes( 8 ) );
+			$install_uuid = bin2hex( random_bytes( 8 ) );
 		} catch ( \Exception $e ) {
 			// random_bytes failed; try openssl as CSPRNG fallback.
 			if ( function_exists( 'openssl_random_pseudo_bytes' ) ) {
 				$strong = false;
 				$raw    = openssl_random_pseudo_bytes( 8, $strong );
 				if ( $strong && false !== $raw ) {
-					$site_id = bin2hex( $raw );
+					$install_uuid = bin2hex( $raw );
 				} else {
 					return ''; // Give up — caller must handle.
 				}
@@ -343,7 +359,7 @@ class WCPG_Auto_Uploader {
 			}
 		}
 
-		update_option( 'wcpg_support_site_id', $site_id, false );
-		return $site_id;
+		update_option( 'wcpg_install_uuid', $install_uuid, false );
+		return $install_uuid;
 	}
 }
