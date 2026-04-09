@@ -470,6 +470,60 @@ class RemoteCommandHandlerTest extends DigipayTestCase {
         $this->assertSame( 2, $state['count'] );
     }
 
+    public function test_redact_scrubs_email_addresses_in_nested_array() {
+        $reflect = new ReflectionClass( 'WCPG_Remote_Command_Handler' );
+        $method  = $reflect->getMethod( 'redact' );
+        $method->setAccessible( true );
+
+        $input = array(
+            'orders' => array(
+                array( 'customer_note' => 'contact admin@example.com for refund' ),
+                array( 'customer_note' => 'ping foo+bar@test.co.uk please' ),
+            ),
+            'plain_text' => 'just text, no PII',
+            'count' => 42,
+        );
+        $out = $method->invoke( null, $input );
+
+        $flat = json_encode( $out );
+        $this->assertStringNotContainsString( 'admin@example.com', $flat );
+        $this->assertStringNotContainsString( 'foo+bar@test.co.uk', $flat );
+        $this->assertStringContainsString( '[EMAIL]', $flat );
+        $this->assertSame( 42, $out['count'], 'non-string values must pass through unchanged' );
+        $this->assertSame( 'just text, no PII', $out['plain_text'] );
+    }
+
+    public function test_redact_scrubs_card_pan_shaped_digits() {
+        $reflect = new ReflectionClass( 'WCPG_Remote_Command_Handler' );
+        $method  = $reflect->getMethod( 'redact' );
+        $method->setAccessible( true );
+
+        $out = $method->invoke( null, array( 'note' => 'card 4111111111111111 was declined' ) );
+        $this->assertStringContainsString( '[CARD]', $out['note'] );
+        $this->assertStringNotContainsString( '4111111111111111', $out['note'] );
+    }
+
+    public function test_redact_preserves_numeric_boolean_null_leaves() {
+        $reflect = new ReflectionClass( 'WCPG_Remote_Command_Handler' );
+        $method  = $reflect->getMethod( 'redact' );
+        $method->setAccessible( true );
+
+        $input = array(
+            'int'   => 123,
+            'float' => 1.23,
+            'bool'  => true,
+            'null'  => null,
+            'nested' => array( 'deep' => array( 'empty' => '' ) ),
+        );
+        $out = $method->invoke( null, $input );
+
+        $this->assertSame( 123, $out['int'] );
+        $this->assertSame( 1.23, $out['float'] );
+        $this->assertTrue( $out['bool'] );
+        $this->assertNull( $out['null'] );
+        $this->assertSame( '', $out['nested']['deep']['empty'] );
+    }
+
     protected function tear_down() {
         // Clean up the HTTP mock so it doesn't leak into other tests.
         unset( $GLOBALS['wcpg_test_http_mocks'][ WCPG_Remote_Command_Handler::FETCH_URL ] );

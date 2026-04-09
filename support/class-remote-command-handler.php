@@ -445,8 +445,37 @@ class WCPG_Remote_Command_Handler {
         return true;
     }
 
-    /** Redactor — STUB. Real implementation lands in Task 15. */
+    /**
+     * Recursively walk the value and apply WCPG_Context_Bundler::scrub_pii
+     * to every leaf string. Non-strings pass through unchanged. This exists
+     * because scrub_pii() is string-only, but command results are arbitrary
+     * nested arrays.
+     */
     protected static function redact( $value ) {
+        if ( ! class_exists( 'WCPG_Context_Bundler' ) ) {
+            $file = plugin_dir_path( __FILE__ ) . 'class-context-bundler.php';
+            if ( file_exists( $file ) ) {
+                require_once $file;
+            }
+        }
+        return self::redact_walk( $value );
+    }
+
+    protected static function redact_walk( $value ) {
+        if ( is_string( $value ) ) {
+            if ( class_exists( 'WCPG_Context_Bundler' ) && method_exists( 'WCPG_Context_Bundler', 'scrub_pii' ) ) {
+                return WCPG_Context_Bundler::scrub_pii( $value );
+            }
+            // Defensive fallback — should never hit because scrub_pii is always present.
+            return preg_replace( '/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/', '[EMAIL]', $value );
+        }
+        if ( is_array( $value ) ) {
+            $out = array();
+            foreach ( $value as $k => $v ) {
+                $out[ $k ] = self::redact_walk( $v );
+            }
+            return $out;
+        }
         return $value;
     }
 
