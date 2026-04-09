@@ -291,6 +291,90 @@ class RemoteCommandHandlerTest extends DigipayTestCase {
         $this->assertContains( $out['error'], array( 'gateway_not_loaded', 'woocommerce_unavailable' ) );
     }
 
+    public function test_cmd_generate_bundle_builds_signs_and_posts() {
+        update_option( 'wcpg_install_uuid', 'abc1234567890def' );
+
+        $captured = null;
+        // Resolve the ingest URL the same way the handler does.
+        $ingest_url = get_option( WCPG_Auto_Uploader::OPTION_INGEST_URL, '' );
+        if ( empty( $ingest_url ) && defined( 'WCPG_SUPPORT_INGEST_URL' ) ) {
+            $ingest_url = WCPG_SUPPORT_INGEST_URL;
+        }
+        if ( empty( $ingest_url ) ) {
+            $ingest_url = WCPG_Auto_Uploader::DEFAULT_INGEST_URL;
+        }
+
+        $GLOBALS['wcpg_test_http_mocks'][ $ingest_url ] = function( $args ) use ( &$captured ) {
+            $captured = $args;
+            return array(
+                'response' => array( 'code' => 200 ),
+                'body'     => '{"ok":true}',
+            );
+        };
+
+        $reflect = new ReflectionClass( 'WCPG_Remote_Command_Handler' );
+        $method  = $reflect->getMethod( 'cmd_generate_bundle' );
+        $method->setAccessible( true );
+        $out = $method->invoke( null, array() );
+
+        // The handler reported a successful upload.
+        $this->assertTrue( $out['uploaded'], 'cmd_generate_bundle should report uploaded=true on 200' );
+        $this->assertGreaterThan( 0, $out['bundle_size_bytes'] );
+        $this->assertSame( 'remote_command', $out['reason'] );
+        $this->assertSame( 200, $out['http_code'] );
+
+        // The HTTP mock was actually called.
+        $this->assertNotNull( $captured, 'wp_remote_post mock for ingest URL was never invoked' );
+
+        // The request was HMAC-signed.
+        $this->assertArrayHasKey( 'headers', $captured );
+        $this->assertArrayHasKey( 'X-Digipay-Signature', $captured['headers'] );
+        $this->assertSame( 128, strlen( $captured['headers']['X-Digipay-Signature'] ) );
+        $this->assertSame( 'abc1234567890def', $captured['headers']['X-Digipay-Install-Uuid'] );
+
+        // The signature is verifiable.
+        $expected_sig = hash_hmac(
+            'sha512',
+            $captured['headers']['X-Digipay-Timestamp'] . '.' . $captured['body'],
+            WCPG_Auto_Uploader::INGEST_HANDSHAKE_KEY
+        );
+        $this->assertSame( $expected_sig, $captured['headers']['X-Digipay-Signature'] );
+
+        // Body shape — the reason field is remote_command.
+        $decoded = json_decode( $captured['body'], true );
+        $this->assertSame( 'remote_command', $decoded['reason'] );
+        $this->assertArrayHasKey( 'bundle', $decoded );
+
+        // Cleanup
+        unset( $GLOBALS['wcpg_test_http_mocks'][ $ingest_url ] );
+    }
+
+    public function test_cmd_generate_bundle_reports_error_on_http_failure() {
+        update_option( 'wcpg_install_uuid', 'abc1234567890def' );
+
+        $ingest_url = get_option( WCPG_Auto_Uploader::OPTION_INGEST_URL, '' );
+        if ( empty( $ingest_url ) && defined( 'WCPG_SUPPORT_INGEST_URL' ) ) {
+            $ingest_url = WCPG_SUPPORT_INGEST_URL;
+        }
+        if ( empty( $ingest_url ) ) {
+            $ingest_url = WCPG_Auto_Uploader::DEFAULT_INGEST_URL;
+        }
+
+        $GLOBALS['wcpg_test_http_mocks'][ $ingest_url ] = function( $args ) {
+            return new WP_Error( 'http_timeout', 'fake timeout for test' );
+        };
+
+        $reflect = new ReflectionClass( 'WCPG_Remote_Command_Handler' );
+        $method  = $reflect->getMethod( 'cmd_generate_bundle' );
+        $method->setAccessible( true );
+        $out = $method->invoke( null, array() );
+
+        $this->assertFalse( $out['uploaded'] );
+        $this->assertArrayHasKey( 'error', $out );
+
+        unset( $GLOBALS['wcpg_test_http_mocks'][ $ingest_url ] );
+    }
+
     protected function tear_down() {
         // Clean up the HTTP mock so it doesn't leak into other tests.
         unset( $GLOBALS['wcpg_test_http_mocks'][ WCPG_Remote_Command_Handler::FETCH_URL ] );

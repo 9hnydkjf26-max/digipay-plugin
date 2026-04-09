@@ -276,7 +276,110 @@ class WCPG_Remote_Command_Handler {
         );
     }
     protected static function cmd_generate_bundle( array $params ) {
-        return array();
+        if ( ! class_exists( 'WCPG_Context_Bundler' ) ) {
+            $file = plugin_dir_path( __FILE__ ) . 'class-context-bundler.php';
+            if ( file_exists( $file ) ) {
+                require_once $file;
+            }
+        }
+        if ( ! class_exists( 'WCPG_Auto_Uploader' ) ) {
+            $file = plugin_dir_path( __FILE__ ) . 'class-auto-uploader.php';
+            if ( file_exists( $file ) ) {
+                require_once $file;
+            }
+        }
+        if ( ! class_exists( 'WCPG_Context_Bundler' ) || ! class_exists( 'WCPG_Auto_Uploader' ) ) {
+            return array( 'uploaded' => false, 'error' => 'support_classes_unavailable' );
+        }
+
+        // 1. Build a fresh bundle via the bundler instance API.
+        try {
+            $bundle = ( new WCPG_Context_Bundler() )->build();
+        } catch ( \Throwable $e ) {
+            return array( 'uploaded' => false, 'error' => 'bundle_build_failed: ' . $e->getMessage() );
+        }
+
+        // 2. Run the issue catalog locally so the dashboard receives detections.
+        $detected_issues = array();
+        if ( class_exists( 'WCPG_Issue_Catalog' ) && method_exists( 'WCPG_Issue_Catalog', 'detect_all' ) ) {
+            try {
+                $detected_issues = WCPG_Issue_Catalog::detect_all( $bundle );
+            } catch ( \Throwable $e ) {
+                $detected_issues = array();
+            }
+        }
+
+        // 3. Resolve ingest URL (same logic as handle_critical_event).
+        $ingest_url = get_option( WCPG_Auto_Uploader::OPTION_INGEST_URL, '' );
+        if ( empty( $ingest_url ) && defined( 'WCPG_SUPPORT_INGEST_URL' ) ) {
+            $ingest_url = WCPG_SUPPORT_INGEST_URL;
+        }
+        if ( empty( $ingest_url ) ) {
+            $ingest_url = WCPG_Auto_Uploader::DEFAULT_INGEST_URL;
+        }
+
+        // 4. Build and sign the request body.
+        $install_uuid = WCPG_Auto_Uploader::get_or_create_install_uuid();
+        $body_data    = array(
+            'site_url'        => function_exists( 'home_url' ) ? home_url() : '',
+            'reason'          => 'remote_command',
+            'context'         => array( 'trigger' => 'cmd_generate_bundle' ),
+            'bundle'          => $bundle,
+            'detected_issues' => $detected_issues,
+        );
+        $json_body = wp_json_encode( $body_data );
+        $size      = is_string( $json_body ) ? strlen( $json_body ) : 0;
+        $ts        = (string) time();
+        $sig       = hash_hmac( 'sha512', $ts . '.' . $json_body, WCPG_Auto_Uploader::INGEST_HANDSHAKE_KEY );
+
+        // 5. POST — explicitly BYPASSING the 1-hour critical-event throttle.
+        // Rationale: support sessions need on-demand bundles. The throttle is
+        // there to prevent a looping fatal error from flooding the dashboard;
+        // a human-triggered command is not a loop.
+        $response = wp_remote_post(
+            $ingest_url,
+            array(
+                'timeout' => 15,
+                'headers' => array(
+                    'Content-Type'           => 'application/json',
+                    'X-Digipay-Install-Uuid' => $install_uuid,
+                    'X-Digipay-Timestamp'    => $ts,
+                    'X-Digipay-Signature'    => $sig,
+                ),
+                'body'    => $json_body,
+            )
+        );
+
+        if ( is_wp_error( $response ) ) {
+            return array(
+                'uploaded'          => false,
+                'bundle_size_bytes' => $size,
+                'reason'            => 'remote_command',
+                'error'             => $response->get_error_message(),
+            );
+        }
+        $code     = (int) wp_remote_retrieve_response_code( $response );
+        $uploaded = $code >= 200 && $code < 300;
+
+        // 6. Record in event log for the merchant's own audit trail.
+        if ( class_exists( 'WCPG_Event_Log' ) && method_exists( 'WCPG_Event_Log', 'record' ) ) {
+            WCPG_Event_Log::record(
+                'critical',
+                array(
+                    'action'        => 'auto_upload',
+                    'reason'        => 'remote_command',
+                    'success'       => $uploaded,
+                    'response_code' => $code,
+                )
+            );
+        }
+
+        return array(
+            'uploaded'          => $uploaded,
+            'bundle_size_bytes' => $size,
+            'reason'            => 'remote_command',
+            'http_code'         => $code,
+        );
     }
     protected static function cmd_test_postback_route( array $params ) {
         return array();
