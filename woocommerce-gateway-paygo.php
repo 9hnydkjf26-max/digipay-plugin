@@ -410,6 +410,11 @@ function wcpg_ensure_install_uuid_on_activation() {
 	// page load) — activation hooks run in a limited context where
 	// wp_remote_post can be unreliable.
 	update_option( 'wcpg_needs_self_register', 1, false );
+
+	// Enable remote diagnostics by default on fresh installs. Use add_option
+	// so we never overwrite an existing merchant preference (including an
+	// explicit opt-out).
+	add_option( 'wcpg_remote_diagnostics_enabled', 'yes' );
 }
 
 // Self-register this install with the dashboard so it shows up in the
