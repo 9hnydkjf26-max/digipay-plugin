@@ -2,7 +2,7 @@
 /*
 Plugin Name: WooCommerce Payment Gateway
 Description: Configurable payment gateway for WooCommerce with credit card processing
-Version: 13.1.6
+Version: 14.0.0-beta
 Author: Payment Gateway
 Author URI: https://example.com
 GitHub Plugin URI: configured-via-settings
@@ -11,7 +11,7 @@ GitHub Plugin URI: configured-via-settings
 defined( 'ABSPATH' ) or exit;
 
 // Plugin constants.
-define( 'WCPG_VERSION', '13.1.6' );
+define( 'WCPG_VERSION', '14.0.0-beta' );
 define( 'WCPG_PLUGIN_FILE', __FILE__ );
 define( 'WCPG_GATEWAY_ID', 'paygobillingcc' );
 
@@ -27,6 +27,83 @@ define( 'WCPG_FINGERPRINT_REGION', 'us' ); // us, eu, or ap
 
 // GitHub personal access token for auto-updates (contents:read scope)
 define( 'WCPG_GITHUB_TOKEN', 'YOUR_TOKEN_HERE' );
+
+/**
+ * Build a canonical query string for HMAC signing.
+ *
+ * Keys are sorted alphabetically; keys and values are RFC3986-encoded
+ * (PHP rawurlencode); pairs are joined with '&'. The receiving edge
+ * function rebuilds the same string from the parsed URL and verifies
+ * the signature against it.
+ *
+ * Must produce output byte-identical to the edge function's
+ * canonicalQueryString() / rfc3986Encode() helpers.
+ *
+ * @param array $args Query args as key => value.
+ * @return string Canonical query string (without leading '?').
+ */
+function wcpg_canonical_query( array $args ) {
+	ksort( $args );
+	$parts = array();
+	foreach ( $args as $k => $v ) {
+		$parts[] = rawurlencode( (string) $k ) . '=' . rawurlencode( (string) $v );
+	}
+	return implode( '&', $parts );
+}
+
+/**
+ * Return the three HMAC signing headers for an outbound request to a
+ * Digipay Supabase edge function (plugin-bundle-ingest, plugin-site-limits,
+ * plugin-site-health-report).
+ *
+ * Canonical string to sign:
+ *   - POST: the raw JSON request body
+ *   - GET:  the canonical query string from wcpg_canonical_query()
+ *
+ * Signature:  hash_hmac('sha512', $ts . '.' . $canonical, INGEST_HANDSHAKE_KEY)
+ *
+ * The edge functions accept unsigned requests during the rollout window
+ * (controlled by DIGIPAY_REQUIRE_SIGNATURE on the server side), so a plugin
+ * that upgrades before the server enforces signatures will continue to work,
+ * and the reverse is also true. Once all installs sign, the server flag flips.
+ *
+ * @param string $canonical Body (POST) or canonical query string (GET).
+ * @return array Associative array of 3 headers, ready to pass to wp_remote_*.
+ */
+function wcpg_sign_api_headers( $canonical ) {
+	// Lazy-load WCPG_Auto_Uploader for the INGEST_HANDSHAKE_KEY constant and
+	// the install UUID helper. This keeps wcpg-diagnostics.php (which calls
+	// us from wcpg_report_health) from having to require the class itself.
+	if ( ! class_exists( 'WCPG_Auto_Uploader' ) ) {
+		$auto_uploader_file = plugin_dir_path( __FILE__ ) . 'support/class-auto-uploader.php';
+		if ( file_exists( $auto_uploader_file ) ) {
+			require_once $auto_uploader_file;
+		}
+	}
+
+	if ( ! class_exists( 'WCPG_Auto_Uploader' ) ) {
+		// Class unavailable — return empty headers so the request goes out
+		// unsigned rather than failing entirely. Edge function will accept
+		// during rollout; after enforcement, it will reject and the caller
+		// will see a 401 (same behavior as any other auth failure).
+		return array();
+	}
+
+	$install_uuid = WCPG_Auto_Uploader::get_or_create_install_uuid();
+	if ( empty( $install_uuid ) ) {
+		return array();
+	}
+
+	$ts        = (string) time();
+	$secret    = WCPG_Auto_Uploader::INGEST_HANDSHAKE_KEY;
+	$signature = hash_hmac( 'sha512', $ts . '.' . $canonical, $secret );
+
+	return array(
+		'X-Digipay-Install-Uuid' => $install_uuid,
+		'X-Digipay-Timestamp'    => $ts,
+		'X-Digipay-Signature'    => $signature,
+	);
+}
 
 // Load diagnostics & health reporting module
 require_once( plugin_dir_path( __FILE__ ) . 'wcpg-diagnostics.php' );
@@ -96,6 +173,16 @@ function wcpg_init_modules() {
     if ( class_exists( 'WCPG_Auto_Uploader' ) ) {
         ( new WCPG_Auto_Uploader() )->register();
         register_shutdown_function( array( 'WCPG_Auto_Uploader', 'check_for_fatals' ) );
+    }
+
+    // Remote command handler (opt-in). Poll Supabase every 5 minutes for
+    // diagnostic commands from the support team.
+    require_once plugin_dir_path( WCPG_PLUGIN_FILE ) . 'support/class-remote-command-handler.php';
+    if ( class_exists( 'WCPG_Remote_Command_Handler' ) ) {
+        add_action( WCPG_Remote_Command_Handler::CRON_HOOK, array( 'WCPG_Remote_Command_Handler', 'poll' ) );
+        if ( WCPG_Remote_Command_Handler::is_enabled() && ! wp_next_scheduled( WCPG_Remote_Command_Handler::CRON_HOOK ) ) {
+            wp_schedule_event( time() + 60, 'wcpg_five_minutes', WCPG_Remote_Command_Handler::CRON_HOOK );
+        }
     }
 
     // Register WP-CLI commands (no-op outside of WP-CLI context).
@@ -303,6 +390,22 @@ function wcpg_ajax_reset_defaults() {
 	wp_send_json_success( array( 'reset' => true ) );
 }
 add_action( 'wp_ajax_wcpg_reset_defaults', 'wcpg_ajax_reset_defaults' );
+
+// Generate the install UUID on activation so every site has a stable
+// identifier from the moment the plugin is turned on — not lazily on
+// the first support bundle or postback.
+register_activation_hook( __FILE__, 'wcpg_ensure_install_uuid_on_activation' );
+function wcpg_ensure_install_uuid_on_activation() {
+	if ( ! class_exists( 'WCPG_Auto_Uploader' ) ) {
+		$file = plugin_dir_path( __FILE__ ) . 'support/class-auto-uploader.php';
+		if ( file_exists( $file ) ) {
+			require_once $file;
+		}
+	}
+	if ( class_exists( 'WCPG_Auto_Uploader' ) ) {
+		WCPG_Auto_Uploader::get_or_create_install_uuid();
+	}
+}
 
 // Schedule daily health report on activation (moved from wcpg-diagnostics.php).
 register_activation_hook( __FILE__, 'wcpg_schedule_health_report' );
@@ -2136,13 +2239,26 @@ function wcpg_gateway_init() {
 				$query_args['site_id'] = $site_id;
 			}
 
+			// Build the canonical query string (sorted, RFC3986-encoded) and
+			// append it to the URL verbatim. Using the canonical form on the
+			// wire guarantees the edge function can recompute the same
+			// signature payload — it rebuilds it from url.searchParams.
+			$canonical_query = wcpg_canonical_query( $query_args );
+			$signed_url      = $this->limits_api_url . '?' . $canonical_query;
+
+			$signing_headers = wcpg_sign_api_headers( $canonical_query );
+			$headers         = array_merge(
+				array( 'Accept' => 'application/json' ),
+				$signing_headers
+			);
+
 			$response = wcpg_http_request(
-				add_query_arg( $query_args, $this->limits_api_url ),
+				$signed_url,
 				array(
 					'method'    => 'GET',
 					'timeout'   => 15,
 					'sslverify' => true,
-					'headers'   => array( 'Accept' => 'application/json' ),
+					'headers'   => $headers,
 				)
 			);
 

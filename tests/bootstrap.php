@@ -850,6 +850,10 @@ $wcpg_mock_downloads = array();
 // Mock wp_remote_post function.
 if ( ! function_exists( 'wp_remote_post' ) ) {
 	function wp_remote_post( $url, $args = array() ) {
+		// Allow per-URL callbacks registered via $GLOBALS['wcpg_test_http_mocks'].
+		if ( ! empty( $GLOBALS['wcpg_test_http_mocks'][ $url ] ) && is_callable( $GLOBALS['wcpg_test_http_mocks'][ $url ] ) ) {
+			return call_user_func( $GLOBALS['wcpg_test_http_mocks'][ $url ], $args );
+		}
 		return new WP_Error( 'not_implemented', 'wp_remote_post is not available in tests' );
 	}
 }
@@ -934,13 +938,29 @@ if ( ! function_exists( 'update_post_meta' ) ) {
 	}
 }
 
+// Allow tests to inject a mock gateway registry used by WC()->payment_gateways->payment_gateways().
+if ( ! isset( $GLOBALS['wcpg_test_payment_gateways'] ) ) {
+	$GLOBALS['wcpg_test_payment_gateways'] = array();
+}
+
+/**
+ * Minimal stub for WC()->payment_gateways that reads from the test global.
+ * Used by WCPG_Remote_Command_Handler::cmd_refresh_limits tests.
+ */
+class WCPG_Test_Payment_Gateways_Stub {
+	public function payment_gateways() {
+		return $GLOBALS['wcpg_test_payment_gateways'];
+	}
+}
+
 // Mock WC() function.
 if ( ! function_exists( 'WC' ) ) {
 	function WC() {
 		static $wc;
 		if ( ! isset( $wc ) ) {
-			$wc = new stdClass();
-			$wc->cart = null;
+			$wc                   = new stdClass();
+			$wc->cart             = null;
+			$wc->payment_gateways = new WCPG_Test_Payment_Gateways_Stub();
 		}
 		return $wc;
 	}
@@ -1073,6 +1093,24 @@ if ( ! function_exists( 'wp_unschedule_event' ) ) {
 		global $wcpg_test_scheduled_events;
 		unset( $wcpg_test_scheduled_events[ $hook ] );
 		return true;
+	}
+}
+
+if ( ! function_exists( 'wp_clear_scheduled_hook' ) ) {
+	/**
+	 * Mock wp_clear_scheduled_hook function.
+	 *
+	 * @param string $hook Hook name.
+	 * @param array  $args Arguments.
+	 * @return int Number of cleared events (always 1 if was scheduled, else 0).
+	 */
+	function wp_clear_scheduled_hook( $hook, $args = array() ) {
+		global $wcpg_test_scheduled_events;
+		if ( isset( $wcpg_test_scheduled_events[ $hook ] ) ) {
+			unset( $wcpg_test_scheduled_events[ $hook ] );
+			return 1;
+		}
+		return 0;
 	}
 }
 

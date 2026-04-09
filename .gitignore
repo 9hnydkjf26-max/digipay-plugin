@@ -25,5 +25,14 @@ phpunit.xml.dist
 # Build artifacts
 *.zip
 
-# Claude
-.claude/
+# Claude — ignore everything EXCEPT the shared support-agent assets so
+# every clone of this repo automatically gets the walkthrough and the
+# SessionEnd logging hook. (The weekly-review skill is intentionally
+# NOT committed — it lives only on the maintainer's machine at the
+# project-root .claude/skills/ directory, outside this git repo.)
+.claude/*
+!.claude/settings.json
+!.claude/agents/
+.claude/agents/*
+!.claude/agents/digipay-support.md
+!.claude/hooks/
