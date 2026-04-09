@@ -113,14 +113,18 @@ class WCPG_Context_Bundler {
 	 */
 	protected function build_meta() {
 		return array(
-			'schema_version'    => 1,
-			'bundle_id'         => $this->uuid4(),
-			'generated_at_utc'  => gmdate( 'c' ),
-			'generated_at_pt'   => function_exists( 'wcpg_get_pacific_date' )
+			'schema_version'              => 1,
+			'bundle_id'                   => $this->uuid4(),
+			'generated_at_utc'            => gmdate( 'c' ),
+			'generated_at_pt'             => function_exists( 'wcpg_get_pacific_date' )
 				? wcpg_get_pacific_date( 'c' )
 				: null,
-			'generator'         => 'WCPG_Context_Bundler',
-			'generator_version' => defined( 'WCPG_VERSION' ) ? WCPG_VERSION : 'unknown',
+			'generator'                   => 'WCPG_Context_Bundler',
+			'generator_version'           => defined( 'WCPG_VERSION' ) ? WCPG_VERSION : 'unknown',
+			'install_uuid'                => ( class_exists( 'WCPG_Auto_Uploader' ) && method_exists( 'WCPG_Auto_Uploader', 'get_or_create_install_uuid' ) )
+				? WCPG_Auto_Uploader::get_or_create_install_uuid()
+				: '',
+			'remote_diagnostics_enabled'  => 'yes' === get_option( 'wcpg_remote_diagnostics_enabled', 'no' ),
 		);
 	}
 

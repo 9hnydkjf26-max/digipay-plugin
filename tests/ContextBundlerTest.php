@@ -6,6 +6,7 @@
  */
 
 require_once __DIR__ . '/../support/class-event-log.php';
+require_once __DIR__ . '/../support/class-auto-uploader.php';
 require_once __DIR__ . '/../support/class-context-bundler.php';
 
 /**
@@ -180,5 +181,44 @@ class ContextBundlerTest extends DigipayTestCase {
 
 		$this->assertArrayHasKey( 'order_correlations', $bundle );
 		$this->assertIsArray( $bundle['order_correlations'] );
+	}
+
+	/**
+	 * bundle_meta includes install_uuid from the stored option.
+	 */
+	public function test_bundle_meta_includes_install_uuid() {
+		update_option( 'wcpg_install_uuid', 'abc1234567890def' );
+		$bundler = new WCPG_Context_Bundler();
+		$bundle  = $bundler->build();
+		$this->assertArrayHasKey( 'bundle_meta', $bundle );
+		$this->assertArrayHasKey( 'install_uuid', $bundle['bundle_meta'] );
+		$this->assertSame( 'abc1234567890def', $bundle['bundle_meta']['install_uuid'] );
+	}
+
+	/**
+	 * bundle_meta generates an install_uuid when none is stored.
+	 */
+	public function test_bundle_meta_install_uuid_is_generated_if_missing() {
+		delete_option( 'wcpg_install_uuid' );
+		$bundler = new WCPG_Context_Bundler();
+		$bundle  = $bundler->build();
+		$this->assertArrayHasKey( 'install_uuid', $bundle['bundle_meta'] );
+		$this->assertNotEmpty( $bundle['bundle_meta']['install_uuid'] );
+		$this->assertSame( 16, strlen( $bundle['bundle_meta']['install_uuid'] ) );
+	}
+
+	/**
+	 * bundle_meta includes remote_diagnostics_enabled as a boolean.
+	 */
+	public function test_bundle_meta_includes_remote_diagnostics_enabled_flag() {
+		update_option( 'wcpg_remote_diagnostics_enabled', 'yes' );
+		$bundler = new WCPG_Context_Bundler();
+		$bundle  = $bundler->build();
+		$this->assertArrayHasKey( 'remote_diagnostics_enabled', $bundle['bundle_meta'] );
+		$this->assertTrue( $bundle['bundle_meta']['remote_diagnostics_enabled'] );
+
+		update_option( 'wcpg_remote_diagnostics_enabled', 'no' );
+		$bundle2 = $bundler->build();
+		$this->assertFalse( $bundle2['bundle_meta']['remote_diagnostics_enabled'] );
 	}
 }
