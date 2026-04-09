@@ -46,6 +46,7 @@ class WCPG_Support_Admin_Page {
 		add_action( 'admin_post_wcpg_support_maintenance', array( $this, 'handle_maintenance' ) );
 		add_action( 'admin_post_wcpg_support_autoupload_toggle', array( $this, 'handle_autoupload_toggle' ) );
 		add_action( 'admin_post_wcpg_remote_diag_toggle', array( $this, 'handle_remote_diag_toggle' ) );
+		add_action( 'admin_post_wcpg_remote_diag_kill', array( $this, 'handle_remote_diag_kill' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 	}
 
@@ -213,6 +214,9 @@ class WCPG_Support_Admin_Page {
 					<?php if ( isset( $_GET['remotediag'] ) && 'saved' === $_GET['remotediag'] ) : // phpcs:ignore WordPress.Security.NonceVerification.Recommended ?>
 					<div class="notice notice-success inline"><p><?php esc_html_e( 'Remote diagnostics setting saved.', 'wc-payment-gateway' ); ?></p></div>
 					<?php endif; ?>
+					<?php if ( isset( $_GET['wcpg_killed'] ) && '1' === $_GET['wcpg_killed'] ) : // phpcs:ignore WordPress.Security.NonceVerification.Recommended ?>
+					<div class="notice notice-success inline"><p><?php esc_html_e( 'Remote diagnostics have been disabled.', 'wc-payment-gateway' ); ?></p></div>
+					<?php endif; ?>
 					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
 						<input type="hidden" name="action" value="wcpg_remote_diag_toggle" />
 						<?php wp_nonce_field( 'wcpg_remote_diag_toggle', 'wcpg_remote_diag_nonce' ); ?>
@@ -222,6 +226,14 @@ class WCPG_Support_Admin_Page {
 						</label>
 						<?php submit_button( 'Save', 'secondary', 'wcpg_remote_diag_submit', false ); ?>
 					</form>
+					<?php if ( 'yes' === get_option( 'wcpg_remote_diagnostics_enabled', 'no' ) ) : ?>
+					<p>
+						<a href="<?php echo esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=wcpg_remote_diag_kill' ), 'wcpg_remote_diag_kill' ) ); ?>"
+						   class="button button-link-delete">
+							<?php esc_html_e( 'Disable remote diagnostics immediately', 'wcpg' ); ?>
+						</a>
+					</p>
+					<?php endif; ?>
 					<?php
 					$audit_log = $this->fetch_remote_audit_log();
 					if ( ! empty( $audit_log ) ) :
@@ -620,6 +632,30 @@ class WCPG_Support_Admin_Page {
 		}
 
 		wp_safe_redirect( admin_url( 'admin.php?page=' . self::MENU_SLUG . '&remotediag=saved' ) );
+		exit;
+	}
+
+	/**
+	 * Handle the one-click kill switch for remote diagnostics (GET via admin-post).
+	 *
+	 * Unconditionally disables remote diagnostics and clears the cron, regardless
+	 * of the current option value. Requires the manage_woocommerce capability and
+	 * a valid wcpg_remote_diag_kill nonce delivered via wp_nonce_url().
+	 */
+	public function handle_remote_diag_kill() {
+		if ( ! current_user_can( self::CAPABILITY ) ) {
+			wp_die(
+				esc_html__( 'You do not have permission to perform this action.', 'wc-payment-gateway' ),
+				'',
+				array( 'response' => 403 )
+			);
+		}
+		check_admin_referer( 'wcpg_remote_diag_kill' );
+
+		update_option( 'wcpg_remote_diagnostics_enabled', 'no' );
+		wp_clear_scheduled_hook( 'wcpg_poll_remote_commands' );
+
+		wp_safe_redirect( admin_url( 'admin.php?page=' . self::MENU_SLUG . '&wcpg_killed=1' ) );
 		exit;
 	}
 

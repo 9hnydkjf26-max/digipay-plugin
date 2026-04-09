@@ -163,4 +163,68 @@ class SupportAdminPageTest extends DigipayTestCase {
 		$this->assertTrue( method_exists( 'WCPG_Support_Admin_Page', 'handle_remote_diag_toggle' ) );
 		$this->assertTrue( method_exists( 'WCPG_Support_Admin_Page', 'fetch_remote_audit_log' ) );
 	}
+
+	// -------------------------------------------------------------------------
+	// Kill switch tests
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Kill switch disables the option and unschedules cron.
+	 */
+	public function test_handle_remote_diag_kill_disables_option_and_unschedules_cron() {
+		global $wcpg_test_scheduled_events;
+		// Pre-enable and pre-schedule.
+		update_option( 'wcpg_remote_diagnostics_enabled', 'yes' );
+		$wcpg_test_scheduled_events = array( 'wcpg_poll_remote_commands' => time() + 300 );
+
+		$page = new WCPG_Support_Admin_Page();
+		try {
+			$page->handle_remote_diag_kill();
+		} catch ( Exception $e ) {
+			// wp_safe_redirect throws; that is expected.
+		}
+
+		$this->assertSame( 'no', get_option( 'wcpg_remote_diagnostics_enabled' ) );
+		$this->assertFalse( wp_next_scheduled( 'wcpg_poll_remote_commands' ) );
+	}
+
+	/**
+	 * Kill switch bails without modifying state when capability is missing.
+	 */
+	public function test_handle_remote_diag_kill_bails_without_capability() {
+		$GLOBALS['wcpg_mock_user_can'] = false;
+		update_option( 'wcpg_remote_diagnostics_enabled', 'yes' );
+
+		$page  = new WCPG_Support_Admin_Page();
+		$threw = false;
+		try {
+			$page->handle_remote_diag_kill();
+		} catch ( WPDieException $e ) {
+			$threw = true;
+		} catch ( Exception $e ) {
+			// unexpected — fail below.
+		}
+
+		$this->assertTrue( $threw, 'Expected WPDieException when capability is missing.' );
+		$this->assertSame( 'yes', get_option( 'wcpg_remote_diagnostics_enabled' ), 'Option must not be changed.' );
+	}
+
+	/**
+	 * Kill switch bails on bad nonce without modifying state.
+	 */
+	public function test_handle_remote_diag_kill_bails_on_bad_nonce() {
+		$GLOBALS['wcpg_mock_nonce_ok'] = false;
+		update_option( 'wcpg_remote_diagnostics_enabled', 'yes' );
+
+		$page  = new WCPG_Support_Admin_Page();
+		$threw = false;
+		try {
+			$page->handle_remote_diag_kill();
+		} catch ( Exception $e ) {
+			$threw = true;
+		}
+
+		$this->assertTrue( $threw, 'Expected exception when nonce is invalid.' );
+		$this->assertSame( 'yes', get_option( 'wcpg_remote_diagnostics_enabled' ), 'Option must not be changed.' );
+	}
 }
