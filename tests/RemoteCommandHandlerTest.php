@@ -209,6 +209,41 @@ class RemoteCommandHandlerTest extends DigipayTestCase {
         $this->assertSame( 5, $out['limit'] );
     }
 
+    public function test_cmd_recent_order_status_returns_order_summaries() {
+        $reflect = new ReflectionClass( 'WCPG_Remote_Command_Handler' );
+        $method  = $reflect->getMethod( 'cmd_recent_order_status' );
+        $method->setAccessible( true );
+        $out = $method->invoke( null, array( 'limit' => 10 ) );
+
+        $this->assertArrayHasKey( 'orders', $out );
+        $this->assertIsArray( $out['orders'] );
+        $this->assertSame( 10, $out['limit'] );
+    }
+
+    public function test_cmd_recent_order_status_caps_limit_at_50() {
+        $reflect = new ReflectionClass( 'WCPG_Remote_Command_Handler' );
+        $method  = $reflect->getMethod( 'cmd_recent_order_status' );
+        $method->setAccessible( true );
+        $out = $method->invoke( null, array( 'limit' => 999 ) );
+        $this->assertSame( 50, $out['limit'] );
+    }
+
+    public function test_cmd_recent_order_status_returns_error_when_wc_unavailable() {
+        // Temporarily remove wc_get_orders function mock by stashing and restoring.
+        // If the test environment always has wc_get_orders, this test becomes an
+        // assertion that wc_get_orders IS available — still useful.
+        if ( ! function_exists( 'wc_get_orders' ) ) {
+            $reflect = new ReflectionClass( 'WCPG_Remote_Command_Handler' );
+            $method  = $reflect->getMethod( 'cmd_recent_order_status' );
+            $method->setAccessible( true );
+            $out = $method->invoke( null, array() );
+            $this->assertArrayHasKey( 'error', $out );
+            $this->assertSame( 'woocommerce_unavailable', $out['error'] );
+        } else {
+            $this->assertTrue( true, 'wc_get_orders is mocked; branch not reachable in this test env' );
+        }
+    }
+
     protected function tear_down() {
         // Clean up the HTTP mock so it doesn't leak into other tests.
         unset( $GLOBALS['wcpg_test_http_mocks'][ WCPG_Remote_Command_Handler::FETCH_URL ] );

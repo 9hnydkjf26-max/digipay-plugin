@@ -193,7 +193,57 @@ class WCPG_Remote_Command_Handler {
         );
     }
     protected static function cmd_recent_order_status( array $params ) {
-        return array();
+        $limit = isset( $params['limit'] ) ? max( 1, min( 50, (int) $params['limit'] ) ) : 20;
+        $gateway_filter = isset( $params['gateway'] )
+            ? preg_replace( '/[^a-z0-9_]/i', '', $params['gateway'] )
+            : null;
+
+        if ( ! function_exists( 'wc_get_orders' ) ) {
+            return array(
+                'orders'  => array(),
+                'limit'   => $limit,
+                'gateway' => $gateway_filter,
+                'error'   => 'woocommerce_unavailable',
+            );
+        }
+
+        $args = array(
+            'limit'   => $limit,
+            'orderby' => 'date',
+            'order'   => 'DESC',
+        );
+        if ( $gateway_filter ) {
+            $args['payment_method'] = $gateway_filter;
+        }
+        $orders = wc_get_orders( $args );
+        if ( ! is_array( $orders ) ) {
+            $orders = array();
+        }
+
+        $orders_out = array();
+        foreach ( $orders as $order ) {
+            if ( ! is_object( $order ) ) {
+                continue;
+            }
+            $date = method_exists( $order, 'get_date_created' ) ? $order->get_date_created() : null;
+            $orders_out[] = array(
+                'id'             => method_exists( $order, 'get_id' ) ? (int) $order->get_id() : 0,
+                'status'         => method_exists( $order, 'get_status' ) ? (string) $order->get_status() : '',
+                'total'          => method_exists( $order, 'get_total' ) ? (float) $order->get_total() : 0.0,
+                'currency'       => method_exists( $order, 'get_currency' ) ? (string) $order->get_currency() : '',
+                'payment_method' => method_exists( $order, 'get_payment_method' ) ? (string) $order->get_payment_method() : '',
+                'date_created'   => ( $date && method_exists( $date, 'format' ) ) ? $date->format( 'c' ) : null,
+                'postback_count' => method_exists( $order, 'get_meta' ) ? (int) $order->get_meta( '_wcpg_postback_count', true ) : 0,
+                'last_postback'  => method_exists( $order, 'get_meta' ) ? ( $order->get_meta( '_wcpg_last_postback_ts', true ) ?: null ) : null,
+                'transaction_id' => method_exists( $order, 'get_transaction_id' ) ? ( $order->get_transaction_id() ?: null ) : null,
+            );
+        }
+
+        return array(
+            'orders'  => $orders_out,
+            'limit'   => $limit,
+            'gateway' => $gateway_filter,
+        );
     }
     protected static function cmd_refresh_limits( array $params ) {
         return array();
