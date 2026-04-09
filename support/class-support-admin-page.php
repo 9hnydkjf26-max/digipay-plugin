@@ -45,6 +45,7 @@ class WCPG_Support_Admin_Page {
 		add_action( 'admin_post_wcpg_support_diagnose', array( $this, 'handle_diagnose' ) );
 		add_action( 'admin_post_wcpg_support_maintenance', array( $this, 'handle_maintenance' ) );
 		add_action( 'admin_post_wcpg_support_autoupload_toggle', array( $this, 'handle_autoupload_toggle' ) );
+		add_action( 'admin_post_wcpg_remote_diag_toggle', array( $this, 'handle_remote_diag_toggle' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 	}
 
@@ -202,6 +203,51 @@ class WCPG_Support_Admin_Page {
 						</label>
 						<?php submit_button( 'Save', 'secondary', 'submit', false ); ?>
 					</form>
+				</div>
+			</details>
+
+			<details style="margin-top:32px;">
+				<summary><strong>Allow Digipay Support Remote Diagnostics</strong></summary>
+				<div style="background:#fff; border:1px solid #ccd0d4; border-left:4px solid #2271b1; padding:15px 20px; margin:12px 0 24px;">
+					<p>When enabled, Digipay support staff may send diagnostic commands to this site (e.g., fetch a log snapshot or run a connectivity check) without requiring you to initiate the request. Commands are logged and you can disable this at any time. No customer data is transmitted.</p>
+					<?php if ( isset( $_GET['remotediag'] ) && 'saved' === $_GET['remotediag'] ) : // phpcs:ignore WordPress.Security.NonceVerification.Recommended ?>
+					<div class="notice notice-success inline"><p><?php esc_html_e( 'Remote diagnostics setting saved.', 'wc-payment-gateway' ); ?></p></div>
+					<?php endif; ?>
+					<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+						<input type="hidden" name="action" value="wcpg_remote_diag_toggle" />
+						<?php wp_nonce_field( 'wcpg_remote_diag_toggle', 'wcpg_remote_diag_nonce' ); ?>
+						<label>
+							<input type="checkbox" name="wcpg_remote_diag_enabled" value="1" <?php checked( 'yes', get_option( 'wcpg_remote_diagnostics_enabled', 'no' ) ); ?> />
+							<?php esc_html_e( 'Allow remote diagnostics', 'wc-payment-gateway' ); ?>
+						</label>
+						<?php submit_button( 'Save', 'secondary', 'wcpg_remote_diag_submit', false ); ?>
+					</form>
+					<?php
+					$audit_log = $this->fetch_remote_audit_log();
+					if ( ! empty( $audit_log ) ) :
+					?>
+					<h4 style="margin:16px 0 8px;"><?php esc_html_e( 'Recent Remote Commands', 'wc-payment-gateway' ); ?></h4>
+					<table class="widefat striped" style="margin-top:8px;">
+						<thead>
+							<tr>
+								<th><?php esc_html_e( 'Time', 'wc-payment-gateway' ); ?></th>
+								<th><?php esc_html_e( 'Command', 'wc-payment-gateway' ); ?></th>
+								<th><?php esc_html_e( 'Issued By', 'wc-payment-gateway' ); ?></th>
+								<th><?php esc_html_e( 'Status', 'wc-payment-gateway' ); ?></th>
+							</tr>
+						</thead>
+						<tbody>
+						<?php foreach ( $audit_log as $entry ) : ?>
+							<tr>
+								<td><?php echo esc_html( isset( $entry['time'] ) ? $entry['time'] : '' ); ?></td>
+								<td><?php echo esc_html( isset( $entry['command'] ) ? $entry['command'] : '' ); ?></td>
+								<td><?php echo esc_html( isset( $entry['issued_by'] ) ? $entry['issued_by'] : '' ); ?></td>
+								<td><?php echo esc_html( isset( $entry['status'] ) ? $entry['status'] : '' ); ?></td>
+							</tr>
+						<?php endforeach; ?>
+						</tbody>
+					</table>
+					<?php endif; ?>
 				</div>
 			</details>
 
@@ -541,6 +587,60 @@ class WCPG_Support_Admin_Page {
 
 		wp_safe_redirect( admin_url( 'admin.php?page=' . self::MENU_SLUG . '&autoupload=saved' ) );
 		exit;
+	}
+
+	/**
+	 * Handle the "Allow Remote Diagnostics" toggle form POST.
+	 *
+	 * Capability check runs first, then nonce, then the option + cron are updated.
+	 * Enabling schedules the wcpg_poll_remote_commands cron (if not already scheduled).
+	 * Disabling clears the cron.
+	 */
+	public function handle_remote_diag_toggle() {
+		if ( ! current_user_can( self::CAPABILITY ) ) {
+			wp_die(
+				esc_html__( 'You do not have permission to perform this action.', 'wc-payment-gateway' ),
+				'',
+				array( 'response' => 403 )
+			);
+		}
+		check_admin_referer( 'wcpg_remote_diag_toggle', 'wcpg_remote_diag_nonce' );
+
+		// Checkbox presence = 'yes', absence = 'no'.
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- nonce checked above.
+		$enabled = ! empty( $_POST['wcpg_remote_diag_enabled'] ) ? 'yes' : 'no';
+		update_option( 'wcpg_remote_diagnostics_enabled', $enabled );
+
+		if ( 'yes' === $enabled ) {
+			if ( ! wp_next_scheduled( 'wcpg_poll_remote_commands' ) ) {
+				wp_schedule_event( time() + 30, 'wcpg_five_minutes', 'wcpg_poll_remote_commands' );
+			}
+		} else {
+			wp_clear_scheduled_hook( 'wcpg_poll_remote_commands' );
+		}
+
+		wp_safe_redirect( admin_url( 'admin.php?page=' . self::MENU_SLUG . '&remotediag=saved' ) );
+		exit;
+	}
+
+	/**
+	 * Fetch the remote-diagnostics audit log for display on the admin page.
+	 *
+	 * For v1 this always returns an empty array. The real audit log fetch
+	 * (reading executed-command records from the Digipay back-end) is a
+	 * future extension. Results are cached in a 60-second transient to
+	 * avoid redundant network calls once that fetch is implemented.
+	 *
+	 * @return array Empty array in v1; future versions return command records.
+	 */
+	public function fetch_remote_audit_log() {
+		$cached = get_transient( 'wcpg_remote_audit_log' );
+		if ( false !== $cached ) {
+			return (array) $cached;
+		}
+		$log = array();
+		set_transient( 'wcpg_remote_audit_log', $log, 60 );
+		return $log;
 	}
 
 	/**
