@@ -421,8 +421,27 @@ class WCPG_Remote_Command_Handler {
         );
     }
 
-    /** Rate limiter — STUB. Real implementation lands in Task 14. */
+    /**
+     * Per-install rolling 1-hour rate limiter. State is a single WP option
+     * with `window_start` (unix ts) and `count` (int). When the window is
+     * older than 3600 seconds, it resets. When count reaches RATE_LIMIT_PER_HOUR,
+     * further calls return false until the window rolls over.
+     *
+     * Returns true if the caller is within the limit (and increments the
+     * counter as a side effect). Returns false if limited.
+     */
     protected static function within_rate_limit() {
+        $now   = time();
+        $state = get_option( self::RATE_LIMIT_OPTION, array() );
+        if ( ! is_array( $state ) || empty( $state['window_start'] )
+            || ( $now - (int) $state['window_start'] ) >= 3600 ) {
+            $state = array( 'window_start' => $now, 'count' => 0 );
+        }
+        if ( (int) $state['count'] >= self::RATE_LIMIT_PER_HOUR ) {
+            return false;
+        }
+        $state['count']++;
+        update_option( self::RATE_LIMIT_OPTION, $state, false );
         return true;
     }
 

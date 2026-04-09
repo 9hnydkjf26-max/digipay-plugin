@@ -429,6 +429,47 @@ class RemoteCommandHandlerTest extends DigipayTestCase {
         unset( $GLOBALS['wcpg_test_http_mocks'][ $expected_url ] );
     }
 
+    public function test_rate_limiter_allows_up_to_20_commands_in_an_hour() {
+        delete_option( WCPG_Remote_Command_Handler::RATE_LIMIT_OPTION );
+        $reflect = new ReflectionClass( 'WCPG_Remote_Command_Handler' );
+        $method  = $reflect->getMethod( 'within_rate_limit' );
+        $method->setAccessible( true );
+
+        for ( $i = 0; $i < 20; $i++ ) {
+            $this->assertTrue( $method->invoke( null ), "command $i should be allowed" );
+        }
+        $this->assertFalse( $method->invoke( null ), 'command 21 should be rate-limited' );
+    }
+
+    public function test_rate_limiter_resets_after_window_elapses() {
+        // Seed state with a window that's more than 1 hour old and already-full count.
+        update_option( WCPG_Remote_Command_Handler::RATE_LIMIT_OPTION, array(
+            'window_start' => time() - 3700,  // > 1 hour ago
+            'count'        => 20,
+        ) );
+        $reflect = new ReflectionClass( 'WCPG_Remote_Command_Handler' );
+        $method  = $reflect->getMethod( 'within_rate_limit' );
+        $method->setAccessible( true );
+        $this->assertTrue( $method->invoke( null ), 'rate limiter should reset after window elapses' );
+    }
+
+    public function test_rate_limiter_state_persists_in_option() {
+        delete_option( WCPG_Remote_Command_Handler::RATE_LIMIT_OPTION );
+        $reflect = new ReflectionClass( 'WCPG_Remote_Command_Handler' );
+        $method  = $reflect->getMethod( 'within_rate_limit' );
+        $method->setAccessible( true );
+
+        $method->invoke( null );
+        $state = get_option( WCPG_Remote_Command_Handler::RATE_LIMIT_OPTION );
+        $this->assertIsArray( $state );
+        $this->assertSame( 1, $state['count'] );
+        $this->assertArrayHasKey( 'window_start', $state );
+
+        $method->invoke( null );
+        $state = get_option( WCPG_Remote_Command_Handler::RATE_LIMIT_OPTION );
+        $this->assertSame( 2, $state['count'] );
+    }
+
     protected function tear_down() {
         // Clean up the HTTP mock so it doesn't leak into other tests.
         unset( $GLOBALS['wcpg_test_http_mocks'][ WCPG_Remote_Command_Handler::FETCH_URL ] );
