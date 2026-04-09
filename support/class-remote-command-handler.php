@@ -174,7 +174,23 @@ class WCPG_Remote_Command_Handler {
         );
     }
     protected static function cmd_event_log_tail( array $params ) {
-        return array();
+        if ( ! class_exists( 'WCPG_Event_Log' ) ) {
+            $file = plugin_dir_path( __FILE__ ) . 'class-event-log.php';
+            if ( file_exists( $file ) ) {
+                require_once $file;
+            }
+        }
+        $limit = isset( $params['limit'] ) ? max( 1, min( 100, (int) $params['limit'] ) ) : 50;
+        $type  = isset( $params['type'] ) ? preg_replace( '/[^a-z0-9_]/i', '', $params['type'] ) : null;
+        $events = array();
+        if ( class_exists( 'WCPG_Event_Log' ) && method_exists( 'WCPG_Event_Log', 'recent' ) ) {
+            $events = WCPG_Event_Log::recent( $limit, $type );
+        }
+        return array(
+            'events' => array_values( is_array( $events ) ? $events : array() ),
+            'limit'  => $limit,
+            'type'   => $type,
+        );
     }
     protected static function cmd_recent_order_status( array $params ) {
         return array();

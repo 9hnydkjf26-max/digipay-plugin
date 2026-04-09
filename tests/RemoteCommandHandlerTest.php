@@ -175,6 +175,40 @@ class RemoteCommandHandlerTest extends DigipayTestCase {
         $this->assertMatchesRegularExpression( '/^\d+\./', $out['php_version'] );
     }
 
+    public function test_cmd_event_log_tail_returns_recent_events() {
+        if ( class_exists( 'WCPG_Event_Log' ) ) {
+            WCPG_Event_Log::record( 'test_event', array( 'msg' => 'hello' ), 'paygo' );
+        }
+        $reflect = new ReflectionClass( 'WCPG_Remote_Command_Handler' );
+        $method  = $reflect->getMethod( 'cmd_event_log_tail' );
+        $method->setAccessible( true );
+        $out = $method->invoke( null, array( 'limit' => 10 ) );
+
+        $this->assertArrayHasKey( 'events', $out );
+        $this->assertIsArray( $out['events'] );
+        $this->assertLessThanOrEqual( 10, count( $out['events'] ) );
+        $this->assertSame( 10, $out['limit'] );
+    }
+
+    public function test_cmd_event_log_tail_caps_limit_at_100() {
+        $reflect = new ReflectionClass( 'WCPG_Remote_Command_Handler' );
+        $method  = $reflect->getMethod( 'cmd_event_log_tail' );
+        $method->setAccessible( true );
+        $out = $method->invoke( null, array( 'limit' => 99999 ) );
+
+        $this->assertSame( 100, $out['limit'] );
+    }
+
+    public function test_cmd_event_log_tail_passes_type_filter() {
+        $reflect = new ReflectionClass( 'WCPG_Remote_Command_Handler' );
+        $method  = $reflect->getMethod( 'cmd_event_log_tail' );
+        $method->setAccessible( true );
+        $out = $method->invoke( null, array( 'limit' => 5, 'type' => 'critical' ) );
+
+        $this->assertSame( 'critical', $out['type'] );
+        $this->assertSame( 5, $out['limit'] );
+    }
+
     protected function tear_down() {
         // Clean up the HTTP mock so it doesn't leak into other tests.
         unset( $GLOBALS['wcpg_test_http_mocks'][ WCPG_Remote_Command_Handler::FETCH_URL ] );
