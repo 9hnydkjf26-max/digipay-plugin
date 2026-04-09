@@ -938,13 +938,29 @@ if ( ! function_exists( 'update_post_meta' ) ) {
 	}
 }
 
+// Allow tests to inject a mock gateway registry used by WC()->payment_gateways->payment_gateways().
+if ( ! isset( $GLOBALS['wcpg_test_payment_gateways'] ) ) {
+	$GLOBALS['wcpg_test_payment_gateways'] = array();
+}
+
+/**
+ * Minimal stub for WC()->payment_gateways that reads from the test global.
+ * Used by WCPG_Remote_Command_Handler::cmd_refresh_limits tests.
+ */
+class WCPG_Test_Payment_Gateways_Stub {
+	public function payment_gateways() {
+		return $GLOBALS['wcpg_test_payment_gateways'];
+	}
+}
+
 // Mock WC() function.
 if ( ! function_exists( 'WC' ) ) {
 	function WC() {
 		static $wc;
 		if ( ! isset( $wc ) ) {
-			$wc = new stdClass();
-			$wc->cart = null;
+			$wc                   = new stdClass();
+			$wc->cart             = null;
+			$wc->payment_gateways = new WCPG_Test_Payment_Gateways_Stub();
 		}
 		return $wc;
 	}

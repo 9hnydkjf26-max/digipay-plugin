@@ -246,7 +246,34 @@ class WCPG_Remote_Command_Handler {
         );
     }
     protected static function cmd_refresh_limits( array $params ) {
-        return array();
+        if ( ! function_exists( 'WC' ) || ! WC() || ! isset( WC()->payment_gateways ) || ! WC()->payment_gateways ) {
+            return array( 'error' => 'woocommerce_unavailable' );
+        }
+        $gateways = WC()->payment_gateways->payment_gateways();
+        if ( ! is_array( $gateways ) || empty( $gateways['paygobillingcc'] ) ) {
+            return array( 'error' => 'gateway_not_loaded' );
+        }
+        $gw = $gateways['paygobillingcc'];
+
+        if ( method_exists( $gw, 'refresh_remote_limits' ) ) {
+            try {
+                $gw->refresh_remote_limits();
+            } catch ( \Throwable $e ) {
+                // swallow — we still want to return whatever cached values we have
+            }
+        }
+        $limits      = method_exists( $gw, 'get_remote_limits' ) ? $gw->get_remote_limits() : array();
+        $daily_total = method_exists( $gw, 'get_daily_transaction_total' )
+            ? (float) $gw->get_daily_transaction_total()
+            : 0.0;
+
+        return array(
+            'limits'       => is_array( $limits ) ? $limits : array(),
+            'daily_total'  => $daily_total,
+            'pacific_date' => function_exists( 'wcpg_get_pacific_date' )
+                ? wcpg_get_pacific_date( 'Y-m-d' )
+                : gmdate( 'Y-m-d' ),
+        );
     }
     protected static function cmd_generate_bundle( array $params ) {
         return array();

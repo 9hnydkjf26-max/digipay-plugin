@@ -244,9 +244,58 @@ class RemoteCommandHandlerTest extends DigipayTestCase {
         }
     }
 
+    public function test_cmd_refresh_limits_returns_limits_and_daily_total() {
+        // Install a minimal mock gateway into the registry.
+        $mock_gw = new class {
+            public $id = 'paygobillingcc';
+            public $enabled = 'yes';
+            public function refresh_remote_limits() { /* no-op */ }
+            public function get_remote_limits() {
+                return array(
+                    'daily_limit'     => 50000.0,
+                    'max_ticket_size' => 5000.0,
+                    'last_updated'    => '2026-04-09T12:00:00Z',
+                );
+            }
+            public function get_daily_transaction_total() {
+                return 12345.67;
+            }
+        };
+        $GLOBALS['wcpg_test_payment_gateways'] = array( 'paygobillingcc' => $mock_gw );
+
+        $reflect = new ReflectionClass( 'WCPG_Remote_Command_Handler' );
+        $method  = $reflect->getMethod( 'cmd_refresh_limits' );
+        $method->setAccessible( true );
+        $out = $method->invoke( null, array() );
+
+        $this->assertArrayHasKey( 'limits', $out );
+        $this->assertArrayHasKey( 'daily_total', $out );
+        $this->assertArrayHasKey( 'pacific_date', $out );
+        $this->assertSame( 50000.0, $out['limits']['daily_limit'] );
+        $this->assertSame( 12345.67, $out['daily_total'] );
+
+        // Cleanup
+        $GLOBALS['wcpg_test_payment_gateways'] = array();
+    }
+
+    public function test_cmd_refresh_limits_reports_error_when_gateway_missing() {
+        $GLOBALS['wcpg_test_payment_gateways'] = array();
+
+        $reflect = new ReflectionClass( 'WCPG_Remote_Command_Handler' );
+        $method  = $reflect->getMethod( 'cmd_refresh_limits' );
+        $method->setAccessible( true );
+        $out = $method->invoke( null, array() );
+
+        $this->assertArrayHasKey( 'error', $out );
+        // Either 'gateway_not_loaded' or 'woocommerce_unavailable' is acceptable.
+        $this->assertContains( $out['error'], array( 'gateway_not_loaded', 'woocommerce_unavailable' ) );
+    }
+
     protected function tear_down() {
         // Clean up the HTTP mock so it doesn't leak into other tests.
         unset( $GLOBALS['wcpg_test_http_mocks'][ WCPG_Remote_Command_Handler::FETCH_URL ] );
+        // Clean up payment gateways mock.
+        $GLOBALS['wcpg_test_payment_gateways'] = array();
         parent::tear_down();
     }
 }
