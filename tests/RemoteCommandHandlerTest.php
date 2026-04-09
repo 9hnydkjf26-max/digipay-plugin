@@ -49,4 +49,48 @@ class RemoteCommandHandlerTest extends DigipayTestCase {
         $next = wp_next_scheduled( WCPG_Remote_Command_Handler::CRON_HOOK );
         $this->assertNotFalse( $next, 'Remote command cron should be scheduled when opt-in is enabled' );
     }
+
+    /**
+     * Guard against regression in the REAL production file. The test above
+     * exercises a test-scoped stub of wcpg_init_modules() because the full
+     * plugin file can't be require_once'd in the test harness (symbol
+     * collisions with bootstrap mocks). This assertion verifies the real
+     * woocommerce-gateway-paygo.php still contains the scheduling block,
+     * so a later edit that accidentally removes it would fail CI.
+     */
+    public function test_real_plugin_file_contains_cron_wiring() {
+        $plugin_file = __DIR__ . '/../woocommerce-gateway-paygo.php';
+        $this->assertFileExists( $plugin_file );
+        $contents = file_get_contents( $plugin_file );
+        $this->assertStringContainsString(
+            'WCPG_Remote_Command_Handler::CRON_HOOK',
+            $contents,
+            'woocommerce-gateway-paygo.php must reference the remote command cron hook'
+        );
+        $this->assertStringContainsString(
+            "add_action( WCPG_Remote_Command_Handler::CRON_HOOK, array( 'WCPG_Remote_Command_Handler', 'poll' ) )",
+            $contents,
+            'woocommerce-gateway-paygo.php must register the poll() callback on the cron hook'
+        );
+        $this->assertStringContainsString(
+            "wp_schedule_event( time() + 60, 'wcpg_five_minutes', WCPG_Remote_Command_Handler::CRON_HOOK )",
+            $contents,
+            'woocommerce-gateway-paygo.php must schedule the cron with the wcpg_five_minutes interval'
+        );
+    }
+
+    /**
+     * Same principle — guard the deactivation cleanup line that lives in
+     * wcpg-diagnostics.php.
+     */
+    public function test_real_deactivation_cleanup_unschedules_remote_commands() {
+        $diagnostics = __DIR__ . '/../wcpg-diagnostics.php';
+        $this->assertFileExists( $diagnostics );
+        $contents = file_get_contents( $diagnostics );
+        $this->assertStringContainsString(
+            "wp_clear_scheduled_hook( 'wcpg_poll_remote_commands' )",
+            $contents,
+            'wcpg-diagnostics.php::wcpg_clear_scheduled_events must unschedule the remote command cron'
+        );
+    }
 }
