@@ -2,7 +2,7 @@
 /*
 Plugin Name: WooCommerce Payment Gateway
 Description: Configurable payment gateway for WooCommerce with credit card processing
-Version: 14.0.0-beta
+Version: 14.0.1-beta
 Author: Payment Gateway
 Author URI: https://example.com
 GitHub Plugin URI: configured-via-settings
@@ -11,7 +11,7 @@ GitHub Plugin URI: configured-via-settings
 defined( 'ABSPATH' ) or exit;
 
 // Plugin constants.
-define( 'WCPG_VERSION', '14.0.0-beta' );
+define( 'WCPG_VERSION', '14.0.1-beta' );
 define( 'WCPG_PLUGIN_FILE', __FILE__ );
 define( 'WCPG_GATEWAY_ID', 'paygobillingcc' );
 
@@ -404,6 +404,70 @@ function wcpg_ensure_install_uuid_on_activation() {
 	}
 	if ( class_exists( 'WCPG_Auto_Uploader' ) ) {
 		WCPG_Auto_Uploader::get_or_create_install_uuid();
+	}
+	// Flag that we still need to self-register with the dashboard so the
+	// admin can assign a site_id. Actual POST happens on admin_init (next
+	// page load) — activation hooks run in a limited context where
+	// wp_remote_post can be unreliable.
+	update_option( 'wcpg_needs_self_register', 1, false );
+}
+
+// Self-register this install with the dashboard so it shows up in the
+// "unregistered plugin instances" panel where an admin assigns a site_id.
+// Runs on every admin_init until it succeeds, then the flag is cleared.
+// Throttled by a 10-minute transient so we don't hammer the endpoint on
+// every page load if the request keeps failing.
+add_action( 'admin_init', 'wcpg_maybe_self_register' );
+function wcpg_maybe_self_register() {
+	if ( ! get_option( 'wcpg_needs_self_register' ) ) {
+		return;
+	}
+	if ( get_transient( 'wcpg_self_register_backoff' ) ) {
+		return;
+	}
+	set_transient( 'wcpg_self_register_backoff', 1, 10 * MINUTE_IN_SECONDS );
+
+	if ( ! class_exists( 'WCPG_Auto_Uploader' ) ) {
+		$file = plugin_dir_path( __FILE__ ) . 'support/class-auto-uploader.php';
+		if ( file_exists( $file ) ) {
+			require_once $file;
+		}
+	}
+	if ( ! class_exists( 'WCPG_Auto_Uploader' ) ) {
+		return;
+	}
+	$install_uuid = WCPG_Auto_Uploader::get_or_create_install_uuid();
+	if ( empty( $install_uuid ) ) {
+		return;
+	}
+
+	$body = array(
+		'instance_token' => $install_uuid,
+		'site_url'       => get_site_url(),
+		'site_name'      => get_bloginfo( 'name' ),
+		'plugin_version' => defined( 'WCPG_VERSION' ) ? WCPG_VERSION : '',
+	);
+
+	$response = wp_remote_post(
+		'https://hzdybwclwqkcobpwxzoo.supabase.co/functions/v1/plugin-site-health-report',
+		array(
+			'timeout' => 10,
+			'headers' => array( 'Content-Type' => 'application/json' ),
+			'body'    => wp_json_encode( $body ),
+		)
+	);
+
+	if ( is_wp_error( $response ) ) {
+		return;
+	}
+	$code = wp_remote_retrieve_response_code( $response );
+	if ( $code < 200 || $code >= 300 ) {
+		return;
+	}
+	$decoded = json_decode( wp_remote_retrieve_body( $response ), true );
+	if ( is_array( $decoded ) && ! empty( $decoded['success'] ) ) {
+		delete_option( 'wcpg_needs_self_register' );
+		delete_transient( 'wcpg_self_register_backoff' );
 	}
 }
 
