@@ -93,4 +93,23 @@ class RemoteCommandHandlerTest extends DigipayTestCase {
             'wcpg-diagnostics.php::wcpg_clear_scheduled_events must unschedule the remote command cron'
         );
     }
+
+    public function test_poll_short_circuits_when_opt_in_disabled() {
+        update_option( WCPG_Remote_Command_Handler::OPT_IN_OPTION, 'no' );
+        $result = WCPG_Remote_Command_Handler::poll();
+        $this->assertSame( 'opt_in_disabled', $result['skipped_reason'] );
+        $this->assertSame( 0, $result['fetched'] );
+        $this->assertSame( 0, $result['completed'] );
+        $this->assertSame( 0, $result['failed'] );
+    }
+
+    public function test_poll_proceeds_when_opt_in_enabled_but_returns_no_commands() {
+        update_option( WCPG_Remote_Command_Handler::OPT_IN_OPTION, 'yes' );
+        // No HTTP mock configured for FETCH_URL — fetch_pending returns [].
+        // This verifies poll() passes the opt-in gate AND short-circuits cleanly
+        // when there are no commands to process, without setting skipped_reason.
+        $result = WCPG_Remote_Command_Handler::poll();
+        $this->assertArrayNotHasKey( 'skipped_reason', $result );
+        $this->assertSame( 0, $result['fetched'] );
+    }
 }
