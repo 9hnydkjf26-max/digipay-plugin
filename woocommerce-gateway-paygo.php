@@ -89,8 +89,8 @@ function wcpg_sign_api_headers( $canonical ) {
 		return array();
 	}
 
-	$install_uuid = WCPG_Auto_Uploader::get_or_create_install_uuid();
-	if ( empty( $install_uuid ) ) {
+	$instance_token = wcpg_get_instance_token();
+	if ( empty( $instance_token ) ) {
 		return array();
 	}
 
@@ -99,7 +99,7 @@ function wcpg_sign_api_headers( $canonical ) {
 	$signature = hash_hmac( 'sha512', $ts . '.' . $canonical, $secret );
 
 	return array(
-		'X-Digipay-Install-Uuid' => $install_uuid,
+		'X-Digipay-Install-Uuid' => $instance_token,
 		'X-Digipay-Timestamp'    => $ts,
 		'X-Digipay-Signature'    => $signature,
 	);
@@ -391,20 +391,13 @@ function wcpg_ajax_reset_defaults() {
 }
 add_action( 'wp_ajax_wcpg_reset_defaults', 'wcpg_ajax_reset_defaults' );
 
-// Generate the install UUID on activation so every site has a stable
-// identifier from the moment the plugin is turned on — not lazily on
-// the first support bundle or postback.
-register_activation_hook( __FILE__, 'wcpg_ensure_install_uuid_on_activation' );
-function wcpg_ensure_install_uuid_on_activation() {
-	if ( ! class_exists( 'WCPG_Auto_Uploader' ) ) {
-		$file = plugin_dir_path( __FILE__ ) . 'support/class-auto-uploader.php';
-		if ( file_exists( $file ) ) {
-			require_once $file;
-		}
-	}
-	if ( class_exists( 'WCPG_Auto_Uploader' ) ) {
-		WCPG_Auto_Uploader::get_or_create_install_uuid();
-	}
+// Ensure the instance token exists on activation so every site has a stable
+// identifier from the moment the plugin is turned on.
+register_activation_hook( __FILE__, 'wcpg_ensure_instance_token_on_activation' );
+function wcpg_ensure_instance_token_on_activation() {
+	// This also triggers migration from wcpg_install_uuid if present.
+	wcpg_get_instance_token();
+
 	// Flag that we still need to self-register with the dashboard so the
 	// admin can assign a site_id. Actual POST happens on admin_init (next
 	// page load) — activation hooks run in a limited context where
@@ -432,23 +425,13 @@ function wcpg_maybe_self_register() {
 	}
 	set_transient( 'wcpg_self_register_backoff', 1, 10 * MINUTE_IN_SECONDS );
 
-	if ( ! class_exists( 'WCPG_Auto_Uploader' ) ) {
-		$file = plugin_dir_path( __FILE__ ) . 'support/class-auto-uploader.php';
-		if ( file_exists( $file ) ) {
-			require_once $file;
-		}
-	}
-	if ( ! class_exists( 'WCPG_Auto_Uploader' ) ) {
-		return;
-	}
-	$install_uuid = WCPG_Auto_Uploader::get_or_create_install_uuid();
-	if ( empty( $install_uuid ) ) {
+	$instance_token = wcpg_get_instance_token();
+	if ( empty( $instance_token ) ) {
 		return;
 	}
 
 	$body = array(
-		'instance_token' => $install_uuid,
-		'site_url'       => get_site_url(),
+		'instance_token' => $instance_token,
 		'site_name'      => get_bloginfo( 'name' ),
 		'plugin_version' => defined( 'WCPG_VERSION' ) ? WCPG_VERSION : '',
 	);
@@ -2291,7 +2274,7 @@ function wcpg_gateway_init() {
 
 		/**
 		 * Fetch transaction limits and site config from central dashboard (Supabase Edge Function).
-		 * Sends site_url alongside site_id so the dashboard can identify the site
+		 * Sends instance_token alongside site_id so the dashboard can identify the site
 		 * even before a site_id has been assigned. If the API response includes a
 		 * site_id, the local setting is updated automatically.
 		 *
@@ -2300,8 +2283,7 @@ function wcpg_gateway_init() {
 		 * @return array Array with 'daily_limit', 'max_ticket_size', and 'site_id'.
 		 */
 		public function get_remote_limits() {
-			$site_id  = $this->get_option( 'siteid' );
-			$site_url = get_site_url();
+			$site_id = $this->get_option( 'siteid' );
 
 			$default_limits = array(
 				'daily_limit'     => 0,
@@ -2310,8 +2292,8 @@ function wcpg_gateway_init() {
 				'status'          => 'unknown',
 			);
 
-			// Build a stable cache key — prefer site_id, fall back to site_url.
-			$cache_key     = ! empty( $site_id ) ? $site_id : $site_url;
+			// Build a stable cache key — prefer site_id, fall back to instance token.
+			$cache_key     = ! empty( $site_id ) ? $site_id : wcpg_get_instance_token();
 			$site_hash     = md5( $cache_key );
 			$transient_key = 'wcpg_remote_limits_' . $site_hash;
 			$cached_limits = get_transient( $transient_key );
@@ -2320,9 +2302,8 @@ function wcpg_gateway_init() {
 				return $cached_limits;
 			}
 
-			// Build query args — always send site_url and instance_token, add site_id when available.
+			// Build query args — send instance_token, add site_id when available.
 			$query_args = array(
-				'site_url'       => $site_url,
 				'instance_token' => wcpg_get_instance_token(),
 			);
 			if ( ! empty( $site_id ) ) {
@@ -2418,9 +2399,8 @@ function wcpg_gateway_init() {
 		 * Force refresh of remote limits (clears cache)
 		 */
 		public function refresh_remote_limits() {
-			$site_id  = $this->get_option( 'siteid' );
-			$site_url = get_site_url();
-			$cache_key = ! empty( $site_id ) ? $site_id : $site_url;
+			$site_id   = $this->get_option( 'siteid' );
+			$cache_key = ! empty( $site_id ) ? $site_id : wcpg_get_instance_token();
 			delete_transient( 'wcpg_remote_limits_' . md5( $cache_key ) );
 			return $this->get_remote_limits();
 		}

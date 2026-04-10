@@ -175,7 +175,6 @@ class InstanceTokenTest extends DigipayTestCase {
 		$health_data = array(
 			'site_id'        => '',
 			'instance_token' => $token,
-			'site_url'       => 'https://example.com',
 		);
 
 		$this->assertSame( $token, $health_data['instance_token'] );
@@ -188,7 +187,6 @@ class InstanceTokenTest extends DigipayTestCase {
 		$token = wcpg_get_instance_token();
 
 		$query_args = array(
-			'site_url'       => 'https://example.com',
 			'instance_token' => $token,
 		);
 

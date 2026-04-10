@@ -713,7 +713,7 @@ class WCPG_Support_Admin_Page {
 	/**
 	 * Delete the remote limits transients for all known site ID derivations.
 	 *
-	 * The transient keys are derived from md5(siteid) or md5(get_site_url()).
+	 * The transient keys are derived from md5(siteid) or md5(instance_token).
 	 * We delete both the primary and last-known variants.
 	 *
 	 * @return void
