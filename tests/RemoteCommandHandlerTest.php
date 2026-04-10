@@ -117,7 +117,7 @@ class RemoteCommandHandlerTest extends DigipayTestCase {
 
     public function test_fetch_pending_signs_request_and_parses_response() {
         update_option( WCPG_Remote_Command_Handler::OPT_IN_OPTION, 'yes' );
-        update_option( 'wcpg_install_uuid', 'abc1234567890def' );
+        update_option( 'wcpg_instance_token', 'abc1234567890def' );
 
         $captured_args = null;
         $GLOBALS['wcpg_test_http_mocks'][ WCPG_Remote_Command_Handler::FETCH_URL ] = function( $args ) use ( &$captured_args ) {
@@ -152,26 +152,25 @@ class RemoteCommandHandlerTest extends DigipayTestCase {
 
         // Body is the expected JSON shape:
         $decoded_body = json_decode( $captured_args['body'], true );
-        $this->assertSame( 'abc1234567890def', $decoded_body['install_uuid'] );
+        $this->assertSame( 'abc1234567890def', $decoded_body['instance_token'] );
 
         // One command was fetched (dispatch + post_result may fail in test harness, but fetched count is set):
         $this->assertSame( 1, $result['fetched'] );
     }
 
     public function test_cmd_whoami_returns_expected_shape() {
-        update_option( 'wcpg_install_uuid', 'abc1234567890def' );
+        update_option( 'wcpg_instance_token', 'abc1234567890def' );
         $reflect = new ReflectionClass( 'WCPG_Remote_Command_Handler' );
         $method  = $reflect->getMethod( 'cmd_whoami' );
         $method->setAccessible( true );
         $out = $method->invoke( null, array() );
 
-        $this->assertSame( 'abc1234567890def', $out['install_uuid'] );
+        $this->assertSame( 'abc1234567890def', $out['instance_token'] );
         $this->assertArrayHasKey( 'plugin_version', $out );
         $this->assertArrayHasKey( 'wp_version', $out );
         $this->assertArrayHasKey( 'php_version', $out );
         $this->assertArrayHasKey( 'active_gateways', $out );
         $this->assertArrayHasKey( 'server_time', $out );
-        $this->assertArrayHasKey( 'site_url', $out );
         $this->assertIsArray( $out['active_gateways'] );
         // PHP version should at least start with a digit followed by a dot.
         $this->assertMatchesRegularExpression( '/^\d+\./', $out['php_version'] );
@@ -294,7 +293,7 @@ class RemoteCommandHandlerTest extends DigipayTestCase {
     }
 
     public function test_cmd_generate_bundle_builds_signs_and_posts() {
-        update_option( 'wcpg_install_uuid', 'abc1234567890def' );
+        update_option( 'wcpg_instance_token', 'abc1234567890def' );
 
         $captured = null;
         // Resolve the ingest URL the same way the handler does.
@@ -352,7 +351,7 @@ class RemoteCommandHandlerTest extends DigipayTestCase {
     }
 
     public function test_cmd_generate_bundle_reports_error_on_http_failure() {
-        update_option( 'wcpg_install_uuid', 'abc1234567890def' );
+        update_option( 'wcpg_instance_token', 'abc1234567890def' );
 
         $ingest_url = get_option( WCPG_Auto_Uploader::OPTION_INGEST_URL, '' );
         if ( empty( $ingest_url ) && defined( 'WCPG_SUPPORT_INGEST_URL' ) ) {
@@ -527,7 +526,7 @@ class RemoteCommandHandlerTest extends DigipayTestCase {
     }
 
     public function test_post_result_signs_request_and_includes_command_id() {
-        update_option( 'wcpg_install_uuid', 'abc1234567890def' );
+        update_option( 'wcpg_instance_token', 'abc1234567890def' );
 
         $captured = null;
         $GLOBALS['wcpg_test_http_mocks'][ WCPG_Remote_Command_Handler::RESULT_URL ] = function( $args ) use ( &$captured ) {
@@ -549,7 +548,7 @@ class RemoteCommandHandlerTest extends DigipayTestCase {
         // Body contains command_id and install_uuid and the result.
         $body = json_decode( $captured['body'], true );
         $this->assertSame( 'cmd-xyz', $body['command_id'] );
-        $this->assertSame( 'abc1234567890def', $body['install_uuid'] );
+        $this->assertSame( 'abc1234567890def', $body['instance_token'] );
         $this->assertSame( array( 'foo' => 'bar' ), $body['result'] );
 
         // Request is HMAC-SHA512 signed.
@@ -565,7 +564,7 @@ class RemoteCommandHandlerTest extends DigipayTestCase {
     }
 
     public function test_post_result_forwards_error_field() {
-        update_option( 'wcpg_install_uuid', 'abc1234567890def' );
+        update_option( 'wcpg_instance_token', 'abc1234567890def' );
 
         $captured = null;
         $GLOBALS['wcpg_test_http_mocks'][ WCPG_Remote_Command_Handler::RESULT_URL ] = function( $args ) use ( &$captured ) {
@@ -587,7 +586,7 @@ class RemoteCommandHandlerTest extends DigipayTestCase {
     }
 
     public function test_post_result_returns_false_on_non_2xx() {
-        update_option( 'wcpg_install_uuid', 'abc1234567890def' );
+        update_option( 'wcpg_instance_token', 'abc1234567890def' );
 
         $GLOBALS['wcpg_test_http_mocks'][ WCPG_Remote_Command_Handler::RESULT_URL ] = function( $args ) {
             return array(
@@ -607,7 +606,7 @@ class RemoteCommandHandlerTest extends DigipayTestCase {
     }
 
     public function test_post_result_returns_false_on_wp_error() {
-        update_option( 'wcpg_install_uuid', 'abc1234567890def' );
+        update_option( 'wcpg_instance_token', 'abc1234567890def' );
 
         $GLOBALS['wcpg_test_http_mocks'][ WCPG_Remote_Command_Handler::RESULT_URL ] = function( $args ) {
             return new WP_Error( 'http_failed', 'network down' );

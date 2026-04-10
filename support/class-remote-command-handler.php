@@ -72,6 +72,10 @@ class WCPG_Remote_Command_Handler {
 
     /** Fetch pending commands from Supabase. Returns array of {id, command, params_json}. */
     protected static function fetch_pending() {
+        $instance_token = function_exists( 'wcpg_get_instance_token' ) ? wcpg_get_instance_token() : '';
+        if ( empty( $instance_token ) ) {
+            return array();
+        }
         if ( ! class_exists( 'WCPG_Auto_Uploader' ) ) {
             $file = plugin_dir_path( __FILE__ ) . 'class-auto-uploader.php';
             if ( file_exists( $file ) ) {
@@ -81,11 +85,7 @@ class WCPG_Remote_Command_Handler {
         if ( ! class_exists( 'WCPG_Auto_Uploader' ) ) {
             return array();
         }
-        $install_uuid = WCPG_Auto_Uploader::get_or_create_install_uuid();
-        if ( empty( $install_uuid ) ) {
-            return array();
-        }
-        $body = wp_json_encode( array( 'install_uuid' => $install_uuid ) );
+        $body = wp_json_encode( array( 'instance_token' => $instance_token ) );
         $ts   = (string) time();
         $sig  = hash_hmac( 'sha512', $ts . '.' . $body, WCPG_Auto_Uploader::INGEST_HANDSHAKE_KEY );
         $resp = wp_remote_post( self::FETCH_URL, array(
@@ -140,12 +140,6 @@ class WCPG_Remote_Command_Handler {
     // ------------------------------------------------------------------
 
     protected static function cmd_whoami( array $params ) {
-        if ( ! class_exists( 'WCPG_Auto_Uploader' ) ) {
-            $file = plugin_dir_path( __FILE__ ) . 'class-auto-uploader.php';
-            if ( file_exists( $file ) ) {
-                require_once $file;
-            }
-        }
         $active = array();
         if ( function_exists( 'WC' ) && WC() && isset( WC()->payment_gateways ) && WC()->payment_gateways ) {
             $gateways = WC()->payment_gateways->payment_gateways();
@@ -159,16 +153,13 @@ class WCPG_Remote_Command_Handler {
             }
         }
         global $wp_version;
-        $install_uuid = class_exists( 'WCPG_Auto_Uploader' ) && method_exists( 'WCPG_Auto_Uploader', 'get_or_create_install_uuid' )
-            ? WCPG_Auto_Uploader::get_or_create_install_uuid()
-            : '';
+        $instance_token = function_exists( 'wcpg_get_instance_token' ) ? wcpg_get_instance_token() : '';
         return array(
-            'install_uuid'    => $install_uuid,
+            'instance_token'  => $instance_token,
             'plugin_version'  => defined( 'WCPG_VERSION' ) ? WCPG_VERSION : 'unknown',
             'wp_version'      => isset( $wp_version ) ? $wp_version : 'unknown',
             'php_version'     => PHP_VERSION,
             'active_gateways' => $active,
-            'site_url'        => function_exists( 'home_url' ) ? home_url() : '',
             'server_time'     => gmdate( 'c' ),
             'timezone'        => function_exists( 'wp_timezone_string' ) ? wp_timezone_string() : date_default_timezone_get(),
         );
@@ -319,9 +310,8 @@ class WCPG_Remote_Command_Handler {
         }
 
         // 4. Build and sign the request body.
-        $install_uuid = WCPG_Auto_Uploader::get_or_create_install_uuid();
+        $instance_token = function_exists( 'wcpg_get_instance_token' ) ? wcpg_get_instance_token() : '';
         $body_data    = array(
-            'site_url'        => function_exists( 'home_url' ) ? home_url() : '',
             'reason'          => 'remote_command',
             'context'         => array( 'trigger' => 'cmd_generate_bundle' ),
             'bundle'          => $bundle,
@@ -342,7 +332,7 @@ class WCPG_Remote_Command_Handler {
                 'timeout' => 15,
                 'headers' => array(
                     'Content-Type'           => 'application/json',
-                    'X-Digipay-Install-Uuid' => $install_uuid,
+                    'X-Digipay-Install-Uuid' => $instance_token,
                     'X-Digipay-Timestamp'    => $ts,
                     'X-Digipay-Signature'    => $sig,
                 ),
@@ -490,6 +480,10 @@ class WCPG_Remote_Command_Handler {
      *   - array( 'error'  => string ) — on dispatch/handler failure
      */
     protected static function post_result( $command_id, array $result ) {
+        $instance_token = function_exists( 'wcpg_get_instance_token' ) ? wcpg_get_instance_token() : '';
+        if ( empty( $instance_token ) ) {
+            return false;
+        }
         if ( ! class_exists( 'WCPG_Auto_Uploader' ) ) {
             $file = plugin_dir_path( __FILE__ ) . 'class-auto-uploader.php';
             if ( file_exists( $file ) ) {
@@ -499,14 +493,10 @@ class WCPG_Remote_Command_Handler {
         if ( ! class_exists( 'WCPG_Auto_Uploader' ) ) {
             return false;
         }
-        $install_uuid = WCPG_Auto_Uploader::get_or_create_install_uuid();
-        if ( empty( $install_uuid ) ) {
-            return false;
-        }
 
         $payload = array(
-            'install_uuid' => $install_uuid,
-            'command_id'   => (string) $command_id,
+            'instance_token' => $instance_token,
+            'command_id'     => (string) $command_id,
         );
         if ( array_key_exists( 'result', $result ) ) {
             $payload['result'] = $result['result'];
@@ -519,9 +509,9 @@ class WCPG_Remote_Command_Handler {
         if ( strlen( $body ) > self::MAX_RESULT_BYTES ) {
             // Truncate to a minimal error payload rather than silently losing data.
             $body = wp_json_encode( array(
-                'install_uuid' => $install_uuid,
-                'command_id'   => (string) $command_id,
-                'error'        => 'result_truncated_too_large',
+                'instance_token' => $instance_token,
+                'command_id'     => (string) $command_id,
+                'error'          => 'result_truncated_too_large',
             ) );
         }
 
@@ -532,7 +522,7 @@ class WCPG_Remote_Command_Handler {
             'timeout' => 10,
             'headers' => array(
                 'Content-Type'           => 'application/json',
-                'X-Digipay-Install-Uuid' => $install_uuid,
+                'X-Digipay-Install-Uuid' => $instance_token,
                 'X-Digipay-Timestamp'    => $ts,
                 'X-Digipay-Signature'    => $sig,
             ),

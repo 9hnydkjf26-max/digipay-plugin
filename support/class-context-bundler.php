@@ -121,8 +121,8 @@ class WCPG_Context_Bundler {
 				: null,
 			'generator'                   => 'WCPG_Context_Bundler',
 			'generator_version'           => defined( 'WCPG_VERSION' ) ? WCPG_VERSION : 'unknown',
-			'install_uuid'                => ( class_exists( 'WCPG_Auto_Uploader' ) && method_exists( 'WCPG_Auto_Uploader', 'get_or_create_install_uuid' ) )
-				? WCPG_Auto_Uploader::get_or_create_install_uuid()
+			'instance_token'              => function_exists( 'wcpg_get_instance_token' )
+				? wcpg_get_instance_token()
 				: '',
 			'remote_diagnostics_enabled'  => 'yes' === get_option( 'wcpg_remote_diagnostics_enabled', 'no' ),
 		);
@@ -137,8 +137,6 @@ class WCPG_Context_Bundler {
 		global $wp_version, $wpdb;
 
 		return array(
-			'home_url'        => function_exists( 'home_url' ) ? home_url() : null,
-			'site_url'        => function_exists( 'site_url' ) ? site_url() : null,
 			'plugin_version'  => defined( 'WCPG_VERSION' ) ? WCPG_VERSION : null,
 			'wp_version'      => isset( $wp_version ) ? $wp_version : null,
 			'wc_version'      => defined( 'WC_VERSION' ) ? WC_VERSION : null,

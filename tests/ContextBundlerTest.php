@@ -193,38 +193,27 @@ class ContextBundlerTest extends DigipayTestCase {
 	}
 
 	/**
-	 * bundle_meta includes install_uuid from the stored option.
+	 * bundle_meta includes instance_token from the stored option.
 	 */
-	public function test_bundle_meta_includes_install_uuid() {
-		update_option( 'wcpg_install_uuid', 'abc1234567890def' );
+	public function test_bundle_meta_includes_instance_token() {
+		update_option( 'wcpg_instance_token', 'abc1234567890def' );
 		$bundler = new WCPG_Context_Bundler();
 		$bundle  = $bundler->build();
 		$this->assertArrayHasKey( 'bundle_meta', $bundle );
-		$this->assertArrayHasKey( 'install_uuid', $bundle['bundle_meta'] );
-		$this->assertSame( 'abc1234567890def', $bundle['bundle_meta']['install_uuid'] );
+		$this->assertArrayHasKey( 'instance_token', $bundle['bundle_meta'] );
+		$this->assertSame( 'abc1234567890def', $bundle['bundle_meta']['instance_token'] );
 	}
 
 	/**
-	 * bundle_meta generates an install_uuid when none is stored.
+	 * bundle_meta generates an instance_token when none is stored.
 	 */
-	public function test_bundle_meta_install_uuid_is_generated_if_missing() {
-		global $wcpg_mock_options;
-		unset( $wcpg_mock_options['wcpg_install_uuid'] );
-		unset( $wcpg_mock_options['wcpg_instance_token'] );
+	public function test_bundle_meta_instance_token_is_generated_if_missing() {
+		delete_option( 'wcpg_instance_token' );
+		delete_option( 'wcpg_install_uuid' );
 		$bundler = new WCPG_Context_Bundler();
 		$bundle  = $bundler->build();
-		$this->assertArrayHasKey( 'install_uuid', $bundle['bundle_meta'] );
-
-		if ( function_exists( 'wcpg_get_instance_token' ) ) {
-			// When the instance token function is available (production path),
-			// it generates a UUID v4 (36 chars).
-			$this->assertNotEmpty( $bundle['bundle_meta']['install_uuid'] );
-			$this->assertSame( 36, strlen( $bundle['bundle_meta']['install_uuid'] ) );
-		} else {
-			// In test harness when wcpg_get_instance_token is not yet loaded,
-			// the deprecated wrapper returns empty.
-			$this->assertSame( '', $bundle['bundle_meta']['install_uuid'] );
-		}
+		$this->assertArrayHasKey( 'instance_token', $bundle['bundle_meta'] );
+		$this->assertNotEmpty( $bundle['bundle_meta']['instance_token'] );
 	}
 
 	/**
