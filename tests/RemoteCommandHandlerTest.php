@@ -27,8 +27,10 @@ class RemoteCommandHandlerTest extends DigipayTestCase {
     protected function set_up() {
         parent::set_up();
         // Reset scheduled events so each test starts clean.
-        global $wcpg_test_scheduled_events;
+        global $wcpg_test_scheduled_events, $wcpg_mock_options;
         $wcpg_test_scheduled_events = array();
+        // Clear instance token so migration from wcpg_install_uuid works fresh each test.
+        unset( $wcpg_mock_options['wcpg_instance_token'] );
         // Register wcpg_init_modules so do_action('plugins_loaded') will call it.
         // In production, add_action('plugins_loaded','wcpg_init_modules',0) wires
         // this; in tests add_action is a no-op, so we wire it manually here.

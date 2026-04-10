@@ -61,6 +61,14 @@ class InstanceTokenTest extends DigipayTestCase {
 		unset( $wcpg_mock_options['wcpg_support_site_id'] );
 	}
 
+	protected function tear_down() {
+		global $wcpg_mock_options;
+		unset( $wcpg_mock_options['wcpg_instance_token'] );
+		unset( $wcpg_mock_options['wcpg_install_uuid'] );
+		unset( $wcpg_mock_options['wcpg_support_site_id'] );
+		parent::tear_down();
+	}
+
 	/**
 	 * Test that wcpg_get_instance_token() generates a valid UUID v4.
 	 */

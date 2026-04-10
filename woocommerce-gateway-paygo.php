@@ -473,6 +473,11 @@ function wcpg_maybe_self_register() {
 	if ( is_array( $decoded ) && ! empty( $decoded['success'] ) ) {
 		delete_option( 'wcpg_needs_self_register' );
 		delete_transient( 'wcpg_self_register_backoff' );
+
+		// Track unprovisioned state: registered but no site_id yet.
+		if ( ! empty( $decoded['registered'] ) && empty( $decoded['site_id'] ) ) {
+			update_option( 'wcpg_awaiting_provisioning', 1, false );
+		}
 	}
 }
 
@@ -2738,6 +2743,29 @@ function wcpg_update_daily_total_on_status_change( $order_id, $old_status, $new_
 	}
 }
 
+
+/**
+ * Add admin notice when site is registered but awaiting provisioning.
+ */
+add_action( 'admin_notices', 'wcpg_awaiting_provisioning_notice' );
+function wcpg_awaiting_provisioning_notice() {
+	if ( ! current_user_can( 'manage_woocommerce' ) ) {
+		return;
+	}
+	if ( ! get_option( 'wcpg_awaiting_provisioning' ) ) {
+		return;
+	}
+	$screen = get_current_screen();
+	if ( ! $screen || strpos( $screen->id, 'woocommerce' ) === false ) {
+		return;
+	}
+	echo '<div class="notice notice-info"><p>';
+	echo '<strong>Digipay:</strong> Your site is registered and waiting for activation. ';
+	echo 'Payment gateways will become available once provisioning is complete. ';
+	echo 'This usually takes less than 24 hours. ';
+	echo 'If you need immediate access, contact <a href="mailto:support@digipay.co">Digipay support</a>.';
+	echo '</p></div>';
+}
 
 /**
  * Add admin notice when daily limit is reached

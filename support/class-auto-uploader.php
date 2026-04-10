@@ -150,11 +150,9 @@ class WCPG_Auto_Uploader {
 		}
 
 		// 6. Build request body.
-		$ts        = (string) time();
-		$site_url  = home_url();
-		$install_uuid = self::get_or_create_install_uuid();
+		$ts             = (string) time();
+		$instance_token = function_exists( 'wcpg_get_instance_token' ) ? wcpg_get_instance_token() : self::get_or_create_install_uuid();
 		$body_data = array(
-			'site_url'        => $site_url,
 			'reason'          => $reason,
 			'context'         => $context,
 			'bundle'          => $bundle,
@@ -190,7 +188,7 @@ class WCPG_Auto_Uploader {
 				'body'    => $json_body,
 				'headers' => array(
 					'Content-Type'         => 'application/json',
-					'X-Digipay-Install-Uuid' => $install_uuid,
+					'X-Digipay-Install-Uuid' => $instance_token,
 					'X-Digipay-Timestamp'  => $ts,
 					'X-Digipay-Signature'  => $signature,
 				),
@@ -316,50 +314,23 @@ class WCPG_Auto_Uploader {
 	}
 
 	/**
-	 * Return the stored install UUID, generating one if it does not exist yet.
-	 *
-	 * This is a stable, auto-generated per-install identifier used to tag
-	 * diagnostic bundle uploads. It is unrelated to the 4-digit CPT gateway
-	 * "Site ID" configured in the payment gateway settings.
-	 *
-	 * Backwards compatible with pre-rename installs that stored the value
-	 * in `wcpg_support_site_id` — reads the legacy option, migrates it to
-	 * `wcpg_install_uuid`, and deletes the old key.
-	 *
-	 * @return string UUID-like identifier (16-hex-char, 8 random bytes).
+	 * @deprecated Use wcpg_get_instance_token() instead.
+	 * @return string Instance token (may be 16-hex for migrated installs or UUID v4 for new ones).
 	 */
 	public static function get_or_create_install_uuid() {
-		$install_uuid = get_option( 'wcpg_install_uuid', '' );
-		if ( ! empty( $install_uuid ) ) {
-			return $install_uuid;
+		if ( function_exists( 'wcpg_get_instance_token' ) ) {
+			return wcpg_get_instance_token();
 		}
 
-		// Migrate from legacy option name if present.
-		$legacy = get_option( 'wcpg_support_site_id', '' );
-		if ( ! empty( $legacy ) ) {
-			update_option( 'wcpg_install_uuid', $legacy, false );
-			delete_option( 'wcpg_support_site_id' );
-			return $legacy;
+		// Fallback: read existing option directly (test harness or very early load).
+		$token = get_option( 'wcpg_instance_token', '' );
+		if ( ! empty( $token ) ) {
+			return $token;
 		}
-
-		try {
-			$install_uuid = bin2hex( random_bytes( 8 ) );
-		} catch ( \Exception $e ) {
-			// random_bytes failed; try openssl as CSPRNG fallback.
-			if ( function_exists( 'openssl_random_pseudo_bytes' ) ) {
-				$strong = false;
-				$raw    = openssl_random_pseudo_bytes( 8, $strong );
-				if ( $strong && false !== $raw ) {
-					$install_uuid = bin2hex( $raw );
-				} else {
-					return ''; // Give up — caller must handle.
-				}
-			} else {
-				return ''; // No CSPRNG available; abort.
-			}
+		$token = get_option( 'wcpg_install_uuid', '' );
+		if ( ! empty( $token ) ) {
+			return $token;
 		}
-
-		update_option( 'wcpg_install_uuid', $install_uuid, false );
-		return $install_uuid;
+		return '';
 	}
 }
