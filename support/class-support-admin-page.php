@@ -116,16 +116,14 @@ class WCPG_Support_Admin_Page {
 			<h1>Digipay Support</h1>
 			<?php $this->render_maintenance_notice(); ?>
 			<?php
-			$install_uuid = class_exists( 'WCPG_Auto_Uploader' )
-				? WCPG_Auto_Uploader::get_or_create_install_uuid()
-				: '';
-			if ( ! empty( $install_uuid ) ) :
+			$instance_token = function_exists( 'wcpg_get_instance_token' ) ? wcpg_get_instance_token() : '';
+			if ( ! empty( $instance_token ) ) :
 				?>
 				<div style="background:#f0f6fc;border-left:4px solid #2271b1;padding:12px 16px;margin:12px 0;">
-					<strong>Your Install ID:</strong>
-					<code style="font-size:14px;padding:2px 8px;background:#fff;"><?php echo esc_html( $install_uuid ); ?></code>
+					<strong>Your Instance Token:</strong>
+					<code style="font-size:14px;padding:2px 8px;background:#fff;"><?php echo esc_html( $instance_token ); ?></code>
 					<p class="description" style="margin:6px 0 0;">
-						If Digipay support asks for your Install ID, copy the value above.
+						If Digipay support asks for your Instance Token, copy the value above.
 						It identifies this WordPress site to our support team and never
 						changes.
 					</p>
@@ -325,17 +323,16 @@ class WCPG_Support_Admin_Page {
 
 			<script>
 			(function () {
-				var siteUrl  = <?php echo wp_json_encode( home_url() ); ?>;
-				var siteHost = <?php echo wp_json_encode( wp_parse_url( home_url(), PHP_URL_HOST ) ?: '' ); ?>;
-				var btn      = document.getElementById( 'wcpg-email-support' );
-				var form     = document.getElementById( 'wcpg-generate-form' );
+				var instanceToken = <?php echo wp_json_encode( $instance_token ); ?>;
+				var btn  = document.getElementById( 'wcpg-email-support' );
+				var form = document.getElementById( 'wcpg-generate-form' );
 				if ( btn && form ) {
 					btn.addEventListener( 'click', function () {
 						form.submit();
 						setTimeout( function () {
-							var subject = encodeURIComponent( 'Digipay diagnostic ' + siteHost );
+							var subject = encodeURIComponent( 'Digipay diagnostic ' + instanceToken );
 							var body    = encodeURIComponent(
-								'Please find attached the diagnostic report.\n\nSite: ' + siteUrl
+								'Please find attached the diagnostic report.\n\nInstance Token: ' + instanceToken
 							);
 							window.location.href = 'mailto:support@digipay.co?subject=' + subject + '&body=' + body;
 						}, 800 );
@@ -425,9 +422,9 @@ class WCPG_Support_Admin_Page {
 		$markdown = $renderer ? $renderer->render( $bundle ) : '';
 		$json     = wp_json_encode( $bundle, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES );
 
-		$host     = wp_parse_url( home_url(), PHP_URL_HOST ) ?: 'site';
-		$host     = preg_replace( '/[^A-Za-z0-9.\-]/', '_', (string) $host );
-		$filename = sprintf( 'digipay-diagnostic-%s-%s.zip', $host, gmdate( 'Ymd-His' ) );
+		$token_prefix = function_exists( 'wcpg_get_instance_token' ) ? wcpg_get_instance_token() : 'site';
+		$token_prefix = preg_replace( '/[^A-Za-z0-9.\-]/', '_', (string) $token_prefix );
+		$filename     = sprintf( 'digipay-diagnostic-%s-%s.zip', $token_prefix, gmdate( 'Ymd-His' ) );
 
 		$zip_path = $this->write_zip( $json, $markdown );
 		if ( ! $zip_path ) {
@@ -722,7 +719,11 @@ class WCPG_Support_Admin_Page {
 	 * @return void
 	 */
 	protected function delete_remote_limits_transients() {
-		$candidates = array( get_site_url(), home_url() );
+		$candidates = array();
+		$instance_token = function_exists( 'wcpg_get_instance_token' ) ? wcpg_get_instance_token() : '';
+		if ( ! empty( $instance_token ) ) {
+			$candidates[] = $instance_token;
+		}
 
 		// Also try the siteid stored in gateway settings.
 		$settings = get_option( 'woocommerce_paygobillingcc_settings', array() );

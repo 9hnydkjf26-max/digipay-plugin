@@ -125,7 +125,7 @@ class WCPG_GitHub_Updater {
 
         $headers = [
             'Accept' => 'application/vnd.github.v3+json',
-            'User-Agent' => 'WordPress/' . get_bloginfo('version') . '; ' . home_url(),
+            'User-Agent' => 'WordPress/' . get_bloginfo('version'),
         ];
 
         if (!empty($this->github_token) && $this->github_token !== 'YOUR_TOKEN_HERE') {

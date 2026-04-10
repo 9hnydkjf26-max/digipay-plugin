@@ -209,7 +209,7 @@ function wcpg_check_connectivity() {
 
     // Test with a simple request
     $start_time = microtime( true );
-    $query_args = array( 'site_url' => get_site_url() );
+    $query_args = array( 'instance_token' => wcpg_get_instance_token() );
     if ( ! empty( $site_id ) ) {
         $query_args['site_id'] = $site_id;
     }
@@ -369,9 +369,9 @@ function wcpg_test_api_connection() {
         'response_data' => null
     );
     
-    $site_url = get_site_url();
+    $instance_token = wcpg_get_instance_token();
 
-    if ( empty( $site_id ) && empty( $site_url ) ) {
+    if ( empty( $site_id ) && empty( $instance_token ) ) {
         $result['message'] = 'Site ID not configured';
         return $result;
     }
@@ -379,7 +379,7 @@ function wcpg_test_api_connection() {
     $api_url = $gateway->limits_api_url;
     $start_time = microtime( true );
 
-    $query_args = array( 'site_url' => $site_url );
+    $query_args = array( 'instance_token' => $instance_token );
     if ( ! empty( $site_id ) ) {
         $query_args['site_id'] = $site_id;
     }
@@ -669,10 +669,10 @@ function wcpg_test_postback_url() {
 function wcpg_report_health() {
     $gateway = new WC_Gateway_Paygo_npaygo();
     $site_id = $gateway->get_option( 'siteid' );
-    $site_url = get_site_url();
+    $instance_token = wcpg_get_instance_token();
 
-    // Allow health reports even without site_id — the dashboard can identify the site by URL.
-    if ( empty( $site_id ) && empty( $site_url ) ) {
+    // Allow health reports even without site_id — the dashboard can identify the site by token.
+    if ( empty( $site_id ) && empty( $instance_token ) ) {
         return false;
     }
     
@@ -708,9 +708,8 @@ function wcpg_report_health() {
     // Build health report
     $health_data = array(
         'site_id' => $site_id,
-        'instance_token' => wcpg_get_instance_token(),
+        'instance_token' => $instance_token,
         'site_name' => get_bloginfo( 'name' ),
-        'site_url' => get_site_url(),
         
         // API status
         'api_status' => $api_status,
@@ -775,6 +774,8 @@ function wcpg_report_health() {
         if ( ! empty( $body['site_id'] ) && empty( $site_id ) ) {
             $remote_site_id = sanitize_text_field( $body['site_id'] );
             $gateway->update_option( 'siteid', $remote_site_id );
+            // Site has been provisioned — clear the awaiting notice.
+            delete_option( 'wcpg_awaiting_provisioning' );
         }
     }
 
@@ -1249,7 +1250,6 @@ function wcpg_render_diagnostics_content( $base_url = null ) {
             <p style="margin: 5px 0;">WordPress: <?php echo esc_html( get_bloginfo( 'version' ) ); ?></p>
             <p style="margin: 5px 0;">WooCommerce: <?php echo defined( 'WC_VERSION' ) ? esc_html( WC_VERSION ) : 'N/A'; ?></p>
             <p style="margin: 5px 0;">Server: <?php echo isset( $_SERVER['SERVER_SOFTWARE'] ) ? esc_html( sanitize_text_field( wp_unslash( $_SERVER['SERVER_SOFTWARE'] ) ) ) : 'Unknown'; ?></p>
-            <p style="margin: 5px 0;">Site URL: <?php echo esc_html( get_site_url() ); ?></p>
         </div>
     </details>
     <?php

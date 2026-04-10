@@ -158,9 +158,9 @@ class MaintenanceActionsTest extends DigipayTestCase {
 	public function test_force_refresh_remote_limits_deletes_known_transients() {
 		global $wcpg_test_transients;
 
-		// Plant known transients keyed by site URL hash.
-		$site_url = home_url();
-		$hash     = md5( $site_url );
+		// Plant known transients keyed by instance token hash.
+		$token = wcpg_get_instance_token();
+		$hash  = md5( $token );
 		$wcpg_test_transients[ 'wcpg_remote_limits_' . $hash ]     = array( 'value' => 'data', 'expiration' => 300 );
 		$wcpg_test_transients[ 'wcpg_last_known_limits_' . $hash ] = array( 'value' => 'data', 'expiration' => 300 );
 

@@ -1436,8 +1436,8 @@ function wcpg_gateway_init() {
 						<?php
 						$instance_token = wcpg_get_instance_token();
 						if ( ! empty( $instance_token ) ) : ?>
-							<br><span style="color: #50575e; font-size: 12px; margin-top: 4px; display: inline-block;">Instance ID: <code style="font-size: 11px;"><?php echo esc_html( $instance_token ); ?></code></span>
-							<br><span style="color: #646970; font-size: 11px;">This ID has been sent to the dashboard for site assignment</span>
+							<br><span style="color: #50575e; font-size: 12px; margin-top: 4px; display: inline-block;">Instance Token: <code style="font-size: 11px;"><?php echo esc_html( $instance_token ); ?></code></span>
+							<br><span style="color: #646970; font-size: 11px;">This token has been sent to the dashboard for site assignment</span>
 						<?php endif; ?>
 					<?php endif; ?>
 					<?php if ( ! empty( $data['description'] ) ) : ?>
@@ -2063,8 +2063,8 @@ function wcpg_gateway_init() {
 								<?php
 								$instance_token = wcpg_get_instance_token();
 								if ( ! empty( $instance_token ) ) : ?>
-									<br><span style="color: #50575e; font-size: 12px;">Instance ID: <code style="font-size: 11px;"><?php echo esc_html( $instance_token ); ?></code></span>
-									<br><span style="color: #646970; font-size: 11px;">This ID has been sent to the dashboard for site assignment</span>
+									<br><span style="color: #50575e; font-size: 12px;">Instance Token: <code style="font-size: 11px;"><?php echo esc_html( $instance_token ); ?></code></span>
+									<br><span style="color: #646970; font-size: 11px;">This token has been sent to the dashboard for site assignment</span>
 								<?php endif; ?>
 							<?php endif; ?>
 						</td>
