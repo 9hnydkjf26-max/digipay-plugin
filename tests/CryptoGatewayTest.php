@@ -77,11 +77,11 @@ class CryptoGatewayTest extends DigipayTestCase {
 	/**
 	 * Test handle_webhook returns 400 when no order ID in request.
 	 */
-	public function test_handle_webhook_returns_400_without_order_id() {
+	public function test_handle_webhook_returns_401_without_auth_header() {
 		$gateway = new WCPG_Gateway_Crypto();
 		$request = new WP_REST_Request_Mock( array() );
 		$response = $gateway->handle_webhook( $request );
-		$this->assertSame( 400, $response->get_status() );
+		$this->assertSame( 401, $response->get_status() );
 	}
 
 	/**

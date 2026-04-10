@@ -282,6 +282,7 @@ class ETransferGatewayTest extends DigipayTestCase {
 			public function get_total() { return '99.99'; }
 			public function get_currency() { return 'CAD'; }
 			public function get_order_number() { return '12345'; }
+			public function set_transaction_id( $id ) {}
 			public function update_meta_data( $key, $value ) {}
 			public function save() {}
 			public function add_order_note( $note ) {}
@@ -318,6 +319,7 @@ class ETransferGatewayTest extends DigipayTestCase {
 			public function get_total() { return '99.99'; }
 			public function get_currency() { return 'CAD'; }
 			public function get_order_number() { return '12345'; }
+			public function set_transaction_id( $id ) {}
 			public function update_meta_data( $key, $value ) {}
 			public function save() {}
 			public function add_order_note( $note ) {}
@@ -352,6 +354,7 @@ class ETransferGatewayTest extends DigipayTestCase {
 			public function get_total() { return '99.99'; }
 			public function get_currency() { return 'CAD'; }
 			public function get_order_number() { return '12345'; }
+			public function set_transaction_id( $id ) {}
 			public function update_meta_data( $key, $value ) {}
 			public function save() {}
 			public function add_order_note( $note ) {}

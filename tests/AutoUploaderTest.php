@@ -217,8 +217,8 @@ class AutoUploaderTest extends DigipayTestCase {
 		$ts   = $GLOBALS['wcpg_last_http_args']['headers']['X-Digipay-Timestamp'];
 		$body = $GLOBALS['wcpg_last_http_args']['body'];
 
-		// 6. Compute expected signature.
-		$expected_sig = hash_hmac( 'sha512', $ts . '.' . $body, 'test-secret-value' );
+		// 6. Compute expected signature using the baked-in handshake key.
+		$expected_sig = hash_hmac( 'sha512', $ts . '.' . $body, WCPG_Auto_Uploader::INGEST_HANDSHAKE_KEY );
 
 		// 7. Assert the signature matches.
 		$this->assertSame(
