@@ -18,12 +18,28 @@ if ( ! function_exists( 'wcpg_get_instance_token' ) ) {
 			return $token;
 		}
 
+		// Migrate from wcpg_install_uuid if present.
+		$legacy_uuid = get_option( 'wcpg_install_uuid', '' );
+		if ( ! empty( $legacy_uuid ) ) {
+			$wcpg_mock_options['wcpg_instance_token'] = $legacy_uuid;
+			unset( $wcpg_mock_options['wcpg_install_uuid'] );
+			return $legacy_uuid;
+		}
+
+		// Migrate from legacy wcpg_support_site_id if present.
+		$legacy_site_id = get_option( 'wcpg_support_site_id', '' );
+		if ( ! empty( $legacy_site_id ) ) {
+			$wcpg_mock_options['wcpg_instance_token'] = $legacy_site_id;
+			unset( $wcpg_mock_options['wcpg_support_site_id'] );
+			return $legacy_site_id;
+		}
+
+		// Generate new UUID v4.
 		$data    = random_bytes( 16 );
 		$data[6] = chr( ord( $data[6] ) & 0x0f | 0x40 );
 		$data[8] = chr( ord( $data[8] ) & 0x3f | 0x80 );
 		$token   = vsprintf( '%s%s-%s-%s-%s-%s%s%s', str_split( bin2hex( $data ), 4 ) );
 
-		// Store in mock options (mirrors update_option behavior in production).
 		$wcpg_mock_options['wcpg_instance_token'] = $token;
 		return $token;
 	}
@@ -41,6 +57,8 @@ class InstanceTokenTest extends DigipayTestCase {
 		parent::set_up();
 		global $wcpg_mock_options;
 		unset( $wcpg_mock_options['wcpg_instance_token'] );
+		unset( $wcpg_mock_options['wcpg_install_uuid'] );
+		unset( $wcpg_mock_options['wcpg_support_site_id'] );
 	}
 
 	/**
@@ -220,5 +238,46 @@ class InstanceTokenTest extends DigipayTestCase {
 
 		$should_update = ! empty( $data['payment_gateway_url'] ) && $data['payment_gateway_url'] !== $local_url;
 		$this->assertFalse( $should_update, 'Should not update when URLs match' );
+	}
+
+	/**
+	 * Test that existing wcpg_install_uuid is migrated to wcpg_instance_token.
+	 */
+	public function test_migrates_install_uuid_to_instance_token() {
+		global $wcpg_mock_options;
+		$wcpg_mock_options['wcpg_install_uuid'] = 'abc1234567890def';
+
+		$token = wcpg_get_instance_token();
+
+		$this->assertSame( 'abc1234567890def', $token, 'Should return the existing install UUID value' );
+		$this->assertSame( 'abc1234567890def', $wcpg_mock_options['wcpg_instance_token'], 'Should store migrated value in new option' );
+		$this->assertArrayNotHasKey( 'wcpg_install_uuid', $wcpg_mock_options, 'Should delete old option after migration' );
+	}
+
+	/**
+	 * Test that legacy wcpg_support_site_id is migrated.
+	 */
+	public function test_migrates_legacy_support_site_id() {
+		global $wcpg_mock_options;
+		$wcpg_mock_options['wcpg_support_site_id'] = 'legacy12345abcde';
+
+		$token = wcpg_get_instance_token();
+
+		$this->assertSame( 'legacy12345abcde', $token );
+		$this->assertSame( 'legacy12345abcde', $wcpg_mock_options['wcpg_instance_token'] );
+		$this->assertArrayNotHasKey( 'wcpg_support_site_id', $wcpg_mock_options );
+	}
+
+	/**
+	 * Test that wcpg_instance_token takes priority over wcpg_install_uuid.
+	 */
+	public function test_existing_instance_token_takes_priority() {
+		global $wcpg_mock_options;
+		$wcpg_mock_options['wcpg_instance_token'] = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+		$wcpg_mock_options['wcpg_install_uuid'] = 'abc1234567890def';
+
+		$token = wcpg_get_instance_token();
+
+		$this->assertSame( 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', $token, 'Existing instance token should win' );
 	}
 }

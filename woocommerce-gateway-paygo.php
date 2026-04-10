@@ -1036,6 +1036,22 @@ function wcpg_get_instance_token() {
         return $token;
     }
 
+    // Migrate from wcpg_install_uuid (the old auto-uploader identifier).
+    $legacy_uuid = get_option( 'wcpg_install_uuid', '' );
+    if ( ! empty( $legacy_uuid ) ) {
+        update_option( 'wcpg_instance_token', $legacy_uuid, true );
+        delete_option( 'wcpg_install_uuid' );
+        return $legacy_uuid;
+    }
+
+    // Migrate from legacy wcpg_support_site_id if present.
+    $legacy_site_id = get_option( 'wcpg_support_site_id', '' );
+    if ( ! empty( $legacy_site_id ) ) {
+        update_option( 'wcpg_instance_token', $legacy_site_id, true );
+        delete_option( 'wcpg_support_site_id' );
+        return $legacy_site_id;
+    }
+
     // Generate UUID v4 using random_bytes().
     $data    = random_bytes( 16 );
     $data[6] = chr( ord( $data[6] ) & 0x0f | 0x40 ); // Version 4.
