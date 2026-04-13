@@ -2687,7 +2687,7 @@ function wcpg_gateway_init() {
 			wp_localize_script( 'wcpg-fingerprint-checkout', 'wcpgFPConfig', array(
 				'key'           => WCPG_FINGERPRINT_PUBLIC_KEY,
 				'region'        => WCPG_FINGERPRINT_REGION,
-				'siteId'        => $this->get_option( 'siteid' ),
+				'siteId'        => hash( 'sha256', $this->get_option( 'siteid' ) . 'fp-salt' ),
 				'siteName'      => get_bloginfo( 'name' ),
 				'cartTotal'     => $cartTotal,
 				'cartItemCount' => $cartItemCount,
