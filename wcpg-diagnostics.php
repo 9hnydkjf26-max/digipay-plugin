@@ -771,10 +771,10 @@ function wcpg_report_health() {
     $response_code = wp_remote_retrieve_response_code( $response );
     if ( $response_code === 200 ) {
         $body = json_decode( wp_remote_retrieve_body( $response ), true );
-        if ( ! empty( $body['site_id'] ) && empty( $site_id ) ) {
-            $remote_site_id = sanitize_text_field( $body['site_id'] );
+        $remote_site_id = isset( $body['site_id'] ) ? sanitize_text_field( $body['site_id'] ) : '';
+        if ( ! empty( $remote_site_id ) && $remote_site_id !== $site_id ) {
             $gateway->update_option( 'siteid', $remote_site_id );
-            // Site has been provisioned — clear the awaiting notice.
+            // Site has been provisioned (or re-assigned) — clear the awaiting notice.
             delete_option( 'wcpg_awaiting_provisioning' );
         }
     }
