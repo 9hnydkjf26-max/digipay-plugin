@@ -592,28 +592,29 @@ function wcpg_etransfer_webhook_v2_handler( $request ) {
  * Verify the per-order postback token.
  *
  * Compares the supplied token against the one stored in order meta.
- * Pre-update orders (no stored token) are allowed through with a warning log
- * for backward compatibility.
+ * Every order MUST have a stored token. Orders without one (created by
+ * plugin versions before 13.1.5) are rejected — those versions have been
+ * superseded long enough that backward compatibility is no longer warranted.
  *
  * @param WC_Order $order    The WooCommerce order object.
  * @param string   $pb_token The token from the postback request.
- * @return bool True if token is valid or order has no stored token (backward compat).
+ * @return bool True if token is valid.
  */
 function wcpg_verify_postback_token( $order, $pb_token ) {
 	$stored_token = $order->get_meta( '_wcpg_postback_token', true );
 
-	// Backward compatibility: pre-update orders have no stored token.
+	// Reject orders with no stored token (legacy or tampered).
 	if ( empty( $stored_token ) ) {
 		if ( function_exists( 'wc_get_logger' ) ) {
 			wc_get_logger()->warning(
-				sprintf( 'Postback token missing for order %d — pre-update order allowed through', $order->get_id() ),
+				sprintf( 'Postback rejected for order %d — no stored token', $order->get_id() ),
 				array( 'source' => 'wcpg-postback' )
 			);
 		}
-		return true;
+		return false;
 	}
 
-	// Require a token if the order has one stored.
+	// Reject requests with no token provided.
 	if ( empty( $pb_token ) ) {
 		return false;
 	}
