@@ -439,6 +439,133 @@ class WCPG_Issue_Catalog {
 				},
 			),
 
+			// ----------------------------------------------------------
+			// WCPG-S-002  Site not provisioned (site_id null)
+			// ----------------------------------------------------------
+			array(
+				'id'            => 'WCPG-S-002',
+				'title'         => 'Site not provisioned in backend',
+				'plain_english' => 'Your site is registered with Digipay but has not been assigned a site ID. All gateways will show as unavailable until provisioning is complete.',
+				'fix'           => 'Contact Digipay support to provision your site. An admin needs to assign a site_id in the site registry.',
+				'severity'      => self::SEV_CRITICAL,
+				'config_only'   => false,
+				'detector'      => static function ( array $bundle ) {
+					// Check if the site has a null or missing site_id.
+					if ( ! isset( $bundle['site'] ) || ! is_array( $bundle['site'] ) ) {
+						return false;
+					}
+
+					$site = $bundle['site'];
+
+					// If instance_token exists but site_id is null/empty, site is not provisioned.
+					$has_token = ! empty( $site['instance_token'] );
+					$has_site  = ! empty( $site['site_id'] );
+
+					return $has_token && ! $has_site;
+				},
+			),
+
+			// ----------------------------------------------------------
+			// WCPG-S-003  Postbacks dead / health report returns registered:false
+			// ----------------------------------------------------------
+			array(
+				'id'            => 'WCPG-S-003',
+				'title'         => 'Postbacks stopped — site health report shows unregistered',
+				'plain_english' => 'The payment processor health check says your site is not registered. Postbacks (transaction confirmations) have stopped arriving, so orders are stuck on-hold.',
+				'fix'           => 'Contact Digipay support with your Install ID. The registration state needs to be corrected in the backend. Also check if a firewall (e.g. Wordfence) is blocking the processor IP.',
+				'severity'      => self::SEV_ERROR,
+				'config_only'   => false,
+				'detector'      => static function ( array $bundle ) {
+					// Detect: has historical postback successes but none recently.
+					$stats = isset( $bundle['diagnostics']['postback_stats'] )
+						? $bundle['diagnostics']['postback_stats']
+						: null;
+
+					if ( ! is_array( $stats ) ) {
+						$stats = isset( $bundle['option_snapshots']['wcpg_postback_stats'] )
+							? $bundle['option_snapshots']['wcpg_postback_stats']
+							: null;
+					}
+
+					if ( ! is_array( $stats ) ) {
+						return false;
+					}
+
+					// Must have had at least one success historically.
+					$success_count = isset( $stats['success_count'] ) ? (int) $stats['success_count'] : 0;
+					if ( $success_count < 1 ) {
+						return false;
+					}
+
+					// Check last_success is older than 7 days.
+					if ( empty( $stats['last_success'] ) ) {
+						return true; // Has successes but no timestamp — suspicious.
+					}
+
+					$last = strtotime( $stats['last_success'] );
+					if ( false === $last ) {
+						return false;
+					}
+
+					$days_ago = ( time() - $last ) / 86400;
+					return $days_ago > 7;
+				},
+			),
+
+			// ----------------------------------------------------------
+			// WCPG-F-001  Postbacks blocked by firewall / bot protection
+			// ----------------------------------------------------------
+			array(
+				'id'            => 'WCPG-F-001',
+				'title'         => 'Postbacks blocked by firewall or bot protection',
+				'plain_english' => 'Your postback URL is reachable, but no postbacks have been received recently. A firewall plugin (e.g. Wordfence) or custom bot-blocking code may be blocking the payment processor.',
+				'fix'           => 'Whitelist the payment processor IP (138.197.148.152) in your firewall or bot-protection settings. Check Wordfence Live Traffic or your custom security code for blocked requests to /wp-json/digipay/v1/postback.',
+				'severity'      => self::SEV_ERROR,
+				'config_only'   => false,
+				'detector'      => static function ( array $bundle ) {
+					// Postback URL is reachable but no recent successes.
+					$conn = isset( $bundle['connectivity_tests']['postback_url'] )
+						? $bundle['connectivity_tests']['postback_url']
+						: null;
+
+					if ( ! is_array( $conn ) || empty( $conn['success'] ) ) {
+						return false; // URL not reachable — different problem.
+					}
+
+					$stats = isset( $bundle['diagnostics']['postback_stats'] )
+						? $bundle['diagnostics']['postback_stats']
+						: null;
+
+					if ( ! is_array( $stats ) ) {
+						$stats = isset( $bundle['option_snapshots']['wcpg_postback_stats'] )
+							? $bundle['option_snapshots']['wcpg_postback_stats']
+							: null;
+					}
+
+					if ( ! is_array( $stats ) ) {
+						return false;
+					}
+
+					$success = isset( $stats['success_count'] ) ? (int) $stats['success_count'] : 0;
+					$errors  = isset( $stats['error_count'] ) ? (int) $stats['error_count'] : 0;
+
+					// URL is reachable but zero successes with some errors — likely blocked.
+					if ( $success === 0 && $errors > 0 ) {
+						return true;
+					}
+
+					// Had successes historically but none in over 7 days, with errors accumulating.
+					if ( $success > 0 && $errors > 0 && ! empty( $stats['last_success'] ) ) {
+						$last = strtotime( $stats['last_success'] );
+						if ( false !== $last && ( time() - $last ) / 86400 > 7 ) {
+							return true;
+						}
+					}
+
+					return false;
+				},
+			),
+
 		); // end return array.
 	}
 

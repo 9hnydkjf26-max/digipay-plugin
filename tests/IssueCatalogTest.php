@@ -22,7 +22,7 @@ class IssueCatalogTest extends DigipayTestCase {
 	public function test_all_returns_array_of_issues() {
 		$issues = WCPG_Issue_Catalog::all();
 		$this->assertIsArray( $issues );
-		$this->assertGreaterThanOrEqual( 11, count( $issues ) );
+		$this->assertGreaterThanOrEqual( 14, count( $issues ) );
 	}
 
 	/**
@@ -240,6 +240,98 @@ class IssueCatalogTest extends DigipayTestCase {
 	}
 
 	/**
+	 * WCPG-S-002: site has instance_token but no site_id.
+	 */
+	public function test_detects_s_002_site_not_provisioned() {
+		$bundle = $this->build_clean_bundle();
+		$bundle['site']['instance_token'] = 'abc-123';
+		$bundle['site']['site_id']        = null;
+		$matched = WCPG_Issue_Catalog::detect_all( $bundle );
+		$ids     = array_column( $matched, 'id' );
+		$this->assertContains( 'WCPG-S-002', $ids );
+	}
+
+	/**
+	 * WCPG-S-002 does NOT fire when site_id is present.
+	 */
+	public function test_s_002_does_not_fire_when_site_id_present() {
+		$bundle = $this->build_clean_bundle();
+		$bundle['site']['instance_token'] = 'abc-123';
+		$bundle['site']['site_id']        = 'site-456';
+		$matched = WCPG_Issue_Catalog::detect_all( $bundle );
+		$ids     = array_column( $matched, 'id' );
+		$this->assertNotContains( 'WCPG-S-002', $ids );
+	}
+
+	/**
+	 * WCPG-S-003: postbacks stopped — last success older than 7 days.
+	 */
+	public function test_detects_s_003_postbacks_dead() {
+		$bundle = $this->build_clean_bundle();
+		$bundle['diagnostics']['postback_stats'] = array(
+			'success_count' => 5,
+			'error_count'   => 0,
+			'last_success'  => gmdate( 'Y-m-d H:i:s', time() - ( 10 * 86400 ) ),
+		);
+		$matched = WCPG_Issue_Catalog::detect_all( $bundle );
+		$ids     = array_column( $matched, 'id' );
+		$this->assertContains( 'WCPG-S-003', $ids );
+	}
+
+	/**
+	 * WCPG-S-003 does NOT fire when last success is recent.
+	 */
+	public function test_s_003_does_not_fire_when_postbacks_recent() {
+		$bundle = $this->build_clean_bundle();
+		$bundle['diagnostics']['postback_stats'] = array(
+			'success_count' => 5,
+			'error_count'   => 0,
+			'last_success'  => gmdate( 'Y-m-d H:i:s', time() - ( 2 * 86400 ) ),
+		);
+		$matched = WCPG_Issue_Catalog::detect_all( $bundle );
+		$ids     = array_column( $matched, 'id' );
+		$this->assertNotContains( 'WCPG-S-003', $ids );
+	}
+
+	/**
+	 * WCPG-F-001: postback URL reachable but blocked by firewall (zero successes, some errors).
+	 */
+	public function test_detects_f_001_postbacks_blocked_by_firewall() {
+		$bundle = $this->build_clean_bundle();
+		$bundle['connectivity_tests']['postback_url'] = array(
+			'success'      => true,
+			'body_preview' => 'ok',
+		);
+		$bundle['diagnostics']['postback_stats'] = array(
+			'success_count' => 0,
+			'error_count'   => 5,
+			'last_success'  => null,
+		);
+		$matched = WCPG_Issue_Catalog::detect_all( $bundle );
+		$ids     = array_column( $matched, 'id' );
+		$this->assertContains( 'WCPG-F-001', $ids );
+	}
+
+	/**
+	 * WCPG-F-001 does NOT fire when postbacks are succeeding.
+	 */
+	public function test_f_001_does_not_fire_when_postbacks_healthy() {
+		$bundle = $this->build_clean_bundle();
+		$bundle['connectivity_tests']['postback_url'] = array(
+			'success'      => true,
+			'body_preview' => 'ok',
+		);
+		$bundle['diagnostics']['postback_stats'] = array(
+			'success_count' => 10,
+			'error_count'   => 0,
+			'last_success'  => gmdate( 'Y-m-d H:i:s', time() - 3600 ),
+		);
+		$matched = WCPG_Issue_Catalog::detect_all( $bundle );
+		$ids     = array_column( $matched, 'id' );
+		$this->assertNotContains( 'WCPG-F-001', $ids );
+	}
+
+	/**
 	 * WCPG-X-005: outbound IP probe failed (null).
 	 */
 	public function test_detects_x_005_missing_outbound_ip() {
@@ -292,7 +384,7 @@ class IssueCatalogTest extends DigipayTestCase {
 		}
 
 		// Non-config-only issues must NOT appear regardless of bundle state.
-		$non_config_ids = array( 'WCPG-X-002', 'WCPG-X-003', 'WCPG-X-004', 'WCPG-P-001', 'WCPG-P-002', 'WCPG-W-001', 'WCPG-X-005', 'WCPG-S-001' );
+		$non_config_ids = array( 'WCPG-X-002', 'WCPG-X-003', 'WCPG-X-004', 'WCPG-P-001', 'WCPG-P-002', 'WCPG-W-001', 'WCPG-X-005', 'WCPG-S-001', 'WCPG-S-002', 'WCPG-S-003', 'WCPG-F-001' );
 		foreach ( $non_config_ids as $nid ) {
 			$this->assertNotContains( $nid, $ids, "Non-config-only issue '{$nid}' should not appear in detect_config_only() output" );
 		}
@@ -426,6 +518,7 @@ class IssueCatalogTest extends DigipayTestCase {
 				'postback_stats' => array(
 					'success_count' => 10,
 					'error_count'   => 0,
+					'last_success'  => gmdate( 'Y-m-d H:i:s', time() - 3600 ),
 				),
 			),
 			'option_snapshots'      => array(
