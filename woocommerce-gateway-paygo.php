@@ -938,7 +938,7 @@ function wcpg_encrypt( $string, $key ) {
     $iv        = openssl_random_pseudo_bytes( $iv_length );
 
     $salt       = openssl_random_pseudo_bytes( 256 );
-    $iterations = 999;
+    $iterations = 100000;
 
     // Derive key using PBKDF2: 256 bits = 64 hex characters (256/4).
     $hash_key = hash_pbkdf2( 'sha512', $key, $salt, $iterations, ( $key_length_bits / 4 ) );
