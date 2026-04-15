@@ -294,6 +294,34 @@ class IssueCatalogTest extends DigipayTestCase {
 	}
 
 	/**
+	 * WCPG-S-004: instance token present but no instance_id or site_id — instance
+	 * never appeared in the dashboard.
+	 */
+	public function test_detects_s_004_instance_not_in_dashboard() {
+		$bundle = $this->build_clean_bundle();
+		$bundle['site']['instance_token'] = '9a5e1f9b-4d53-4db2-9e83-24012f03413e';
+		$bundle['site']['instance_id']    = null;
+		$bundle['site']['site_id']        = null;
+		$matched = WCPG_Issue_Catalog::detect_all( $bundle );
+		$ids     = array_column( $matched, 'id' );
+		$this->assertContains( 'WCPG-S-004', $ids );
+	}
+
+	/**
+	 * WCPG-S-004 does NOT fire when instance_id is present (instance IS known
+	 * to dashboard — S-002 may fire instead if site_id is null).
+	 */
+	public function test_s_004_does_not_fire_when_instance_id_present() {
+		$bundle = $this->build_clean_bundle();
+		$bundle['site']['instance_token'] = '9a5e1f9b-4d53-4db2-9e83-24012f03413e';
+		$bundle['site']['instance_id']    = 42;
+		$bundle['site']['site_id']        = null;
+		$matched = WCPG_Issue_Catalog::detect_all( $bundle );
+		$ids     = array_column( $matched, 'id' );
+		$this->assertNotContains( 'WCPG-S-004', $ids );
+	}
+
+	/**
 	 * WCPG-F-001: postback URL reachable but blocked by firewall (zero successes, some errors).
 	 */
 	public function test_detects_f_001_postbacks_blocked_by_firewall() {
@@ -384,7 +412,7 @@ class IssueCatalogTest extends DigipayTestCase {
 		}
 
 		// Non-config-only issues must NOT appear regardless of bundle state.
-		$non_config_ids = array( 'WCPG-X-002', 'WCPG-X-003', 'WCPG-X-004', 'WCPG-P-001', 'WCPG-P-002', 'WCPG-W-001', 'WCPG-X-005', 'WCPG-S-001', 'WCPG-S-002', 'WCPG-S-003', 'WCPG-F-001' );
+		$non_config_ids = array( 'WCPG-X-002', 'WCPG-X-003', 'WCPG-X-004', 'WCPG-P-001', 'WCPG-P-002', 'WCPG-W-001', 'WCPG-X-005', 'WCPG-S-001', 'WCPG-S-002', 'WCPG-S-003', 'WCPG-S-004', 'WCPG-F-001' );
 		foreach ( $non_config_ids as $nid ) {
 			$this->assertNotContains( $nid, $ids, "Non-config-only issue '{$nid}' should not appear in detect_config_only() output" );
 		}

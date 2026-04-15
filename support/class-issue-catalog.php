@@ -466,13 +466,13 @@ class WCPG_Issue_Catalog {
 			),
 
 			// ----------------------------------------------------------
-			// WCPG-S-003  Postbacks dead / health report returns registered:false
+			// WCPG-S-003  Postbacks dead — no successful postbacks in 7+ days
 			// ----------------------------------------------------------
 			array(
 				'id'            => 'WCPG-S-003',
-				'title'         => 'Postbacks stopped — site health report shows unregistered',
-				'plain_english' => 'The payment processor health check says your site is not registered. Postbacks (transaction confirmations) have stopped arriving, so orders are stuck on-hold.',
-				'fix'           => 'Contact Digipay support with your Install ID. The registration state needs to be corrected in the backend. Also check if a firewall (e.g. Wordfence) is blocking the processor IP.',
+				'title'         => 'Postbacks stopped — no successful postbacks in over 7 days',
+				'plain_english' => 'Your site previously received payment confirmations (postbacks) but none have arrived in over a week. Orders may be stuck on-hold.',
+				'fix'           => 'Contact Digipay support with your Instance Token. Check if a firewall (e.g. Wordfence) or custom bot-blocking code is blocking the processor IP (138.197.148.152).',
 				'severity'      => self::SEV_ERROR,
 				'config_only'   => false,
 				'detector'      => static function ( array $bundle ) {
@@ -563,6 +563,37 @@ class WCPG_Issue_Catalog {
 					}
 
 					return false;
+				},
+			),
+
+			// ----------------------------------------------------------
+			// WCPG-S-004  Instance not appearing in dashboard unregistered queue
+			// ----------------------------------------------------------
+			array(
+				'id'            => 'WCPG-S-004',
+				'title'         => 'Instance not appearing in dashboard',
+				'plain_english' => 'Your plugin is installed and responding to diagnostics, but it has not appeared in the Digipay dashboard. The registration handshake may not have fired or was not recorded.',
+				'fix'           => 'Contact Digipay support with your Instance Token. An admin needs to manually create the instance record in the dashboard so a Site ID can be assigned.',
+				'severity'      => self::SEV_ERROR,
+				'config_only'   => false,
+				'detector'      => static function ( array $bundle ) {
+					// Detect: whoami completed (plugin is alive) but instance has
+					// no site record at all — distinct from S-002 where the instance
+					// IS known but site_id is null.
+					if ( ! isset( $bundle['site'] ) || ! is_array( $bundle['site'] ) ) {
+						return false;
+					}
+
+					$site = $bundle['site'];
+
+					// Instance token present but no instance_id / registration record.
+					$has_token    = ! empty( $site['instance_token'] );
+					$has_instance = ! empty( $site['instance_id'] );
+					$has_site     = ! empty( $site['site_id'] );
+
+					// Token exists, but neither instance_id nor site_id — backend
+					// has no record of this instance at all.
+					return $has_token && ! $has_instance && ! $has_site;
 				},
 			),
 
