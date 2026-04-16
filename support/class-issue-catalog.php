@@ -640,6 +640,73 @@ class WCPG_Issue_Catalog {
 				},
 			),
 
+			// ----------------------------------------------------------
+			// WCPG-S-006  CC checkout rejected by processor — referrer domain mismatch
+			// ----------------------------------------------------------
+			array(
+				'id'            => 'WCPG-S-006',
+				'title'         => 'CC checkout failing at processor — referrer domain field set in CPT Gateway',
+				'plain_english' => 'Customers are being redirected to the payment page but immediately see "Something went wrong with your transaction." The payment processor is rejecting the checkout before any transaction is created. This is usually caused by a referrer domain restriction set in the CPT Gateway dashboard that does not match the checkout origin.',
+				'fix'           => 'Log into the CPT Gateway dashboard, find the Referrer Domain field for this site, and clear it. Leave the field blank unless you have a specific reason to restrict by domain. Save, then retry a test checkout.',
+				'severity'      => self::SEV_ERROR,
+				'config_only'   => true,
+				'introduced_in' => '14.1.1',
+				'detector'      => static function ( array $bundle ) {
+					// Signal: CC gateway has a siteid configured, recent CC orders
+					// exist, but ALL of them have no paygo_transaction_id — meaning
+					// checkout redirected to the processor but no transaction was ever
+					// created (processor rejected before assigning an ID).
+
+					// 1. CC gateway must have a siteid set.
+					$cc_settings = isset( $bundle['gateways']['paygobillingcc'] )
+						? $bundle['gateways']['paygobillingcc']
+						: array();
+
+					if ( empty( $cc_settings['siteid'] ) ) {
+						return false;
+					}
+
+					// 2. Must have at least one recent failed CC order.
+					$failed_orders = isset( $bundle['recent_failed_orders'] )
+						? $bundle['recent_failed_orders']
+						: array();
+
+					if ( ! is_array( $failed_orders ) || count( $failed_orders ) === 0 ) {
+						return false;
+					}
+
+					// 3. Find CC orders — there must be at least one.
+					$cc_orders = array_filter( $failed_orders, static function ( $o ) {
+						return isset( $o['payment_method'] ) && $o['payment_method'] === 'paygobillingcc';
+					} );
+
+					if ( count( $cc_orders ) === 0 ) {
+						return false;
+					}
+
+					// 4. ALL CC orders must have an empty paygo_transaction_id.
+					// If even one has a transaction ID the processor did accept some
+					// checkouts — this isn't a blanket processor rejection.
+					foreach ( $cc_orders as $order ) {
+						if ( ! empty( $order['paygo_transaction_id'] ) ) {
+							return false;
+						}
+					}
+
+					// 5. Postback route must be reachable (rules out connectivity
+					// issues that would also produce zero transaction IDs).
+					$postback_test = isset( $bundle['connectivity_tests']['postback_url'] )
+						? $bundle['connectivity_tests']['postback_url']
+						: null;
+
+					if ( is_array( $postback_test ) && empty( $postback_test['success'] ) ) {
+						return false; // Postback route down — different problem.
+					}
+
+					return true;
+				},
+			),
+
 		); // end return array.
 	}
 
