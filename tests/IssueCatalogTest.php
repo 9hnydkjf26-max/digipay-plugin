@@ -355,6 +355,67 @@ class IssueCatalogTest extends DigipayTestCase {
 	}
 
 	/**
+	 * WCPG-S-006: CC gateway has siteid, recent CC orders exist, all have empty
+	 * paygo_transaction_id — processor rejecting checkout before transaction created.
+	 */
+	public function test_detects_s_006_cc_checkout_rejected_by_processor() {
+		$bundle = $this->build_clean_bundle();
+		$bundle['gateways']['paygobillingcc']['siteid'] = '1234';
+		$bundle['recent_failed_orders'] = array(
+			array(
+				'payment_method'       => 'paygobillingcc',
+				'paygo_transaction_id' => '',
+				'paygo_status'         => '',
+			),
+			array(
+				'payment_method'       => 'paygobillingcc',
+				'paygo_transaction_id' => '',
+				'paygo_status'         => '',
+			),
+		);
+		$matched = WCPG_Issue_Catalog::detect_all( $bundle );
+		$ids     = array_column( $matched, 'id' );
+		$this->assertContains( 'WCPG-S-006', $ids );
+	}
+
+	/**
+	 * WCPG-S-006 does NOT fire when at least one CC order has a paygo_transaction_id
+	 * (processor accepted at least one checkout — not a blanket rejection).
+	 */
+	public function test_s_006_does_not_fire_when_transaction_id_present() {
+		$bundle = $this->build_clean_bundle();
+		$bundle['gateways']['paygobillingcc']['siteid'] = '1234';
+		$bundle['recent_failed_orders'] = array(
+			array(
+				'payment_method'       => 'paygobillingcc',
+				'paygo_transaction_id' => 'TXN-ABC-123',
+				'paygo_status'         => 'approved',
+			),
+		);
+		$matched = WCPG_Issue_Catalog::detect_all( $bundle );
+		$ids     = array_column( $matched, 'id' );
+		$this->assertNotContains( 'WCPG-S-006', $ids );
+	}
+
+	/**
+	 * WCPG-S-006 does NOT fire when siteid is missing (gateway not configured yet).
+	 */
+	public function test_s_006_does_not_fire_without_siteid() {
+		$bundle = $this->build_clean_bundle();
+		// No siteid in paygobillingcc settings.
+		$bundle['recent_failed_orders'] = array(
+			array(
+				'payment_method'       => 'paygobillingcc',
+				'paygo_transaction_id' => '',
+				'paygo_status'         => '',
+			),
+		);
+		$matched = WCPG_Issue_Catalog::detect_all( $bundle );
+		$ids     = array_column( $matched, 'id' );
+		$this->assertNotContains( 'WCPG-S-006', $ids );
+	}
+
+	/**
 	 * WCPG-F-001: postback URL reachable but blocked by firewall (zero successes, some errors).
 	 */
 	public function test_detects_f_001_postbacks_blocked_by_firewall() {
