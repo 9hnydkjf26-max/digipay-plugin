@@ -22,7 +22,7 @@ class IssueCatalogTest extends DigipayTestCase {
 	public function test_all_returns_array_of_issues() {
 		$issues = WCPG_Issue_Catalog::all();
 		$this->assertIsArray( $issues );
-		$this->assertGreaterThanOrEqual( 14, count( $issues ) );
+		$this->assertGreaterThanOrEqual( 15, count( $issues ) );
 	}
 
 	/**
@@ -322,6 +322,39 @@ class IssueCatalogTest extends DigipayTestCase {
 	}
 
 	/**
+	 * WCPG-S-005: instance registered, site_id null, and event log contains
+	 * "pricing configuration" 404.
+	 */
+	public function test_detects_s_005_pricing_config_missing() {
+		$bundle = $this->build_clean_bundle();
+		$bundle['site']['instance_token'] = '9a5e1f9b-4d53-4db2-9e83-24012f03413e';
+		$bundle['site']['instance_id']    = 42;
+		$bundle['site']['site_id']        = null;
+		$bundle['logs']                   = array(
+			array( 'message' => 'plugin-site-limits 404: No pricing configuration found for this site' ),
+		);
+		$matched = WCPG_Issue_Catalog::detect_all( $bundle );
+		$ids     = array_column( $matched, 'id' );
+		$this->assertContains( 'WCPG-S-005', $ids );
+	}
+
+	/**
+	 * WCPG-S-005 does NOT fire when site_id is present (pricing config exists).
+	 */
+	public function test_s_005_does_not_fire_when_site_id_present() {
+		$bundle = $this->build_clean_bundle();
+		$bundle['site']['instance_token'] = '9a5e1f9b-4d53-4db2-9e83-24012f03413e';
+		$bundle['site']['instance_id']    = 42;
+		$bundle['site']['site_id']        = 'site_abc123';
+		$bundle['logs']                   = array(
+			array( 'message' => 'plugin-site-limits 404: No pricing configuration found for this site' ),
+		);
+		$matched = WCPG_Issue_Catalog::detect_all( $bundle );
+		$ids     = array_column( $matched, 'id' );
+		$this->assertNotContains( 'WCPG-S-005', $ids );
+	}
+
+	/**
 	 * WCPG-F-001: postback URL reachable but blocked by firewall (zero successes, some errors).
 	 */
 	public function test_detects_f_001_postbacks_blocked_by_firewall() {
@@ -412,7 +445,7 @@ class IssueCatalogTest extends DigipayTestCase {
 		}
 
 		// Non-config-only issues must NOT appear regardless of bundle state.
-		$non_config_ids = array( 'WCPG-X-002', 'WCPG-X-003', 'WCPG-X-004', 'WCPG-P-001', 'WCPG-P-002', 'WCPG-W-001', 'WCPG-X-005', 'WCPG-S-001', 'WCPG-S-002', 'WCPG-S-003', 'WCPG-S-004', 'WCPG-F-001' );
+		$non_config_ids = array( 'WCPG-X-002', 'WCPG-X-003', 'WCPG-X-004', 'WCPG-P-001', 'WCPG-P-002', 'WCPG-W-001', 'WCPG-X-005', 'WCPG-S-001', 'WCPG-S-002', 'WCPG-S-003', 'WCPG-S-004', 'WCPG-S-005', 'WCPG-F-001' );
 		foreach ( $non_config_ids as $nid ) {
 			$this->assertNotContains( $nid, $ids, "Non-config-only issue '{$nid}' should not appear in detect_config_only() output" );
 		}

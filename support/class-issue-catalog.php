@@ -597,6 +597,49 @@ class WCPG_Issue_Catalog {
 				},
 			),
 
+			// ----------------------------------------------------------
+			// WCPG-S-005  Site ID blocked by missing pricing config
+			// ----------------------------------------------------------
+			array(
+				'id'            => 'WCPG-S-005',
+				'title'         => 'Site ID assigned but not delivered — pricing config missing',
+				'plain_english' => 'Your site has been provisioned and a Site ID was assigned, but the plugin cannot receive it because the pricing configuration has not been created yet. The limits endpoint returns a 404 until pricing is set up.',
+				'fix'           => 'An admin needs to create the pricing configuration for this site in the dashboard. Once the pricing row exists, the plugin will receive its Site ID on the next poll automatically.',
+				'severity'      => self::SEV_ERROR,
+				'config_only'   => false,
+				'detector'      => static function ( array $bundle ) {
+					// Detect: instance is registered (has instance_id) but site_id
+					// is null, AND the event log shows a "pricing configuration"
+					// 404 from plugin-site-limits.
+					if ( ! isset( $bundle['site'] ) || ! is_array( $bundle['site'] ) ) {
+						return false;
+					}
+
+					$site = $bundle['site'];
+
+					$has_instance = ! empty( $site['instance_id'] );
+					$has_site     = ! empty( $site['site_id'] );
+
+					if ( ! $has_instance || $has_site ) {
+						return false;
+					}
+
+					// Look for pricing-related 404 in the event log.
+					if ( ! isset( $bundle['logs'] ) || ! is_array( $bundle['logs'] ) ) {
+						return false;
+					}
+
+					foreach ( $bundle['logs'] as $entry ) {
+						$msg = isset( $entry['message'] ) ? $entry['message'] : '';
+						if ( stripos( $msg, 'pricing configuration' ) !== false || stripos( $msg, 'No pricing configuration found' ) !== false ) {
+							return true;
+						}
+					}
+
+					return false;
+				},
+			),
+
 		); // end return array.
 	}
 
